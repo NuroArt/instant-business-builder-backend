@@ -15,7 +15,6 @@ async function handleStart(chatId) {
       `${esc("/help")} — how this works\n` +
       `${esc("/examples")} — see a sample kit\n` +
       `${esc("/niches")} — niche ideas to try\n` +
-           `${esc("/upgrade")} — premium add\\-ons\n` +
       `${esc("/settings")} — preferences\n` +
       `${esc("/support")} — get help\n` +
       `${esc("/restart")} — start over`,
