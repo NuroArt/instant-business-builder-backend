@@ -11,17 +11,17 @@ const telegram = require("./telegram");
 const handleStart = require("./handlers/start");
 const buildHandler = require("./handlers/build");
 const handleHelp = require("./handlers/help");
-const handleUpgrade = require("./handlers/upgrade");
 const handleExamples = require("./handlers/examples");
 const handleNiches = require("./handlers/niches");
 const settingsHandler = require("./handlers/settings");
 const handleSupport = require("./handlers/support");
 const handleRestart = require("./handlers/restart");
-const handleContentPack = require("./handlers/contentpack");
-const handleAutomationPack = require("./handlers/automationpack");
-const handleWebsitePack = require("./handlers/websitepack");
-const handleBrandingPack = require("./handlers/brandingpack");
-const { sendOfferDetail } = require("./handlers/offerDetail");
+// NOTE: /upgrade, /contentpack, /automationpack, /websitepack, /brandingpack
+// are temporarily disabled until Payhip checkout is live — see handlers/upgrade.js,
+// handlers/contentpack.js, handlers/automationpack.js, handlers/websitepack.js,
+// handlers/brandingpack.js, and handlers/offerDetail.js (still present, just unused).
+// To re-enable: restore these requires, the COMMANDS entries below, and the
+// "upgrade:" callback_query handler.
 
 const app = express();
 app.use(express.json());
@@ -35,16 +35,11 @@ const COMMANDS = {
   "/start": (chatId) => handleStart(chatId),
   "/build": (chatId) => buildHandler.handleBuild(chatId),
   "/help": (chatId) => handleHelp(chatId),
-  "/upgrade": (chatId) => handleUpgrade(chatId),
   "/examples": (chatId) => handleExamples(chatId),
   "/niches": (chatId) => handleNiches(chatId),
   "/settings": (chatId) => settingsHandler.handleSettings(chatId),
   "/support": (chatId) => handleSupport(chatId),
   "/restart": (chatId) => handleRestart(chatId),
-  "/contentpack": (chatId) => handleContentPack(chatId),
-  "/automationpack": (chatId) => handleAutomationPack(chatId),
-  "/websitepack": (chatId) => handleWebsitePack(chatId),
-  "/brandingpack": (chatId) => handleBrandingPack(chatId),
 };
 
 /**
@@ -119,11 +114,6 @@ async function routeCallbackQuery(callbackQuery) {
 
   if (data.startsWith("settings:")) {
     await settingsHandler.handleSettingsCallback(chatId, data);
-    return;
-  }
-
-  if (data.startsWith("upgrade:")) {
-    await sendOfferDetail(chatId, data.split(":")[1]);
     return;
   }
 
