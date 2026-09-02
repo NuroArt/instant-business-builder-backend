@@ -8,7 +8,24 @@ Telegram bot backend for **Instant Business Builder** (NuroWorks). Node.js + Exp
 ```
 index.js                    Express server, webhook endpoint, command router
 telegram.js                 Telegram Bot API wrapper (axios, manual HTTP calls)
-claude.js                   Claude (Anthropic Messages API) wrapper + master prompt
+claude.js
+   package.json {
+  "name": "instant-business-builder-backend",
+  "version": "1.0.0",
+  "description": "Telegram business builder bot backend",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}
+
+              Claude (Anthropic Messages API) wrapper + master prompt
 handlers/
   start.js                  /start
   build.js                  /build — niche flow + kit generation + delivery
@@ -23,13 +40,6 @@ utils/
   formatOutput.js            Converts kit JSON into Telegram MarkdownV2 messages
   logger.js                  Minimal structured logger
 .env                         Config (tokens, keys, port)
-package.json {
-  "name": "instant-business-builder-backend",
-  "version": "1.0.0",
-  "description": "Telegram business builder bot backend",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.6.0",
