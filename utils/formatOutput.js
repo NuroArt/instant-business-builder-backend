@@ -1,21 +1,16 @@
 // utils/formatOutput.js
-// Converts raw business-kit data (or plain strings) into clean, Telegram-safe
-// MarkdownV2 messages, split by module.
 
 const MD_ESCAPE_RE = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
 
-/** Escapes MarkdownV2 reserved characters inside plain text content. */
 function esc(text) {
   if (text === null || text === undefined) return "";
   return String(text).replace(MD_ESCAPE_RE, "\\$1");
 }
 
-/** Renders a bold section header line, e.g. "🔹 BUSINESS FOUNDATION" */
 function header(title) {
   return `*${esc(`🔹 ${title.toUpperCase()}`)}*`;
 }
 
-/** Renders an array as a bullet list, escaping each item. */
 function bulletList(items = []) {
   return items
     .filter(Boolean)
@@ -23,7 +18,6 @@ function bulletList(items = []) {
     .join("\n");
 }
 
-/** Renders a labeled field: "*Label:* value" */
 function field(label, value) {
   if (!value) return "";
   return `*${esc(label)}:*\n${esc(value)}`;
@@ -31,12 +25,8 @@ function field(label, value) {
 
 const DIVIDER = "─────────────────────";
 
-/**
- * Formats the "foundation" module.
- */
 function formatFoundation(data = {}) {
   const parts = [header("Business Foundation")];
-
   if (data.businessNames?.length) {
     parts.push("*Business Name Options:*\n" + bulletList(data.businessNames));
   }
@@ -47,16 +37,11 @@ function formatFoundation(data = {}) {
   parts.push(field("Target Audience", data.targetAudience));
   parts.push(field("Competitor Snapshot", data.competitorSnapshot));
   parts.push(field("Market Gap", data.marketGap));
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the "products" module.
- */
 function formatProducts(data = {}) {
   const parts = [header("Product Suite")];
-
   if (data.digitalProducts?.length) {
     parts.push("*Digital Products:*\n" + bulletList(data.digitalProducts));
   }
@@ -72,16 +57,11 @@ function formatProducts(data = {}) {
   if (data.upsellsAndBundles?.length) {
     parts.push("*Upsells \\& Bundles:*\n" + bulletList(data.upsellsAndBundles));
   }
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the "websiteCopy" module.
- */
 function formatWebsiteCopy(data = {}) {
   const parts = [header("Website Copy")];
-
   parts.push(field("Homepage", data.homepage));
   parts.push(field("About Page", data.about));
   parts.push(field("Services Page", data.servicesPage));
@@ -92,16 +72,11 @@ function formatWebsiteCopy(data = {}) {
     parts.push("*Taglines:*\n" + bulletList(data.taglines));
   }
   parts.push(field("Brand Voice Guide", data.brandVoiceGuide));
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the "marketing" module.
- */
 function formatMarketing(data = {}) {
   const parts = [header("Marketing System")];
-
   if (data.contentCalendar30Day?.length) {
     const days = data.contentCalendar30Day
       .map((item, i) => `Day ${i + 1}: ${esc(item)}`)
@@ -133,31 +108,21 @@ function formatMarketing(data = {}) {
     parts.push("*Email Welcome Sequence:*\n" + emails);
   }
   parts.push(field("Lead Magnet Concept", data.leadMagnetConcept));
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the "automation" module.
- */
 function formatAutomation(data = {}) {
   const parts = [header("Automation Workflows")];
-
   parts.push(field("Client Onboarding Workflow", data.clientOnboarding));
   parts.push(field("Content Automation Workflow", data.contentAutomation));
   parts.push(field("Sales Funnel Automation", data.salesFunnelAutomation));
   parts.push(field("Lead Capture Automation", data.leadCaptureAutomation));
   parts.push(field("Weekly Operations Automation", data.weeklyOperations));
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the "monetization" module.
- */
 function formatMonetization(data = {}) {
   const parts = [header("Monetization Strategy")];
-
   parts.push(field("Pricing Recommendations", data.pricingRecommendations));
   if (data.salesAngles?.length) {
     parts.push("*Sales Angles:*\n" + bulletList(data.salesAngles));
@@ -165,16 +130,9 @@ function formatMonetization(data = {}) {
   parts.push(field("Funnel Strategy", data.funnelStrategy));
   parts.push(field("Launch Plan", data.launchPlan));
   parts.push(field("Growth Roadmap", data.growthRoadmap));
-
   return parts.filter(Boolean).join("\n\n");
 }
 
-/**
- * Formats the full business kit into an ordered array of message strings —
- * one per module, ready to be sent sequentially via telegram.sendMessage.
- * @param {object} kit - parsed JSON object from claude.generateBusinessKit
- * @returns {string[]}
- */
 function formatBusinessKit(kit = {}) {
   const modules = [
     formatFoundation(kit.foundation),
@@ -184,14 +142,9 @@ function formatBusinessKit(kit = {}) {
     formatAutomation(kit.automation),
     formatMonetization(kit.monetization),
   ];
-
   return modules.filter((m) => m && m.trim().length > 0);
 }
 
-/**
- * Generic helper for handlers that just need a clean header + body message
- * (e.g. /help, /upgrade). Not tied to the business-kit shape.
- */
 function formatSimpleMessage(title, bodyLines = []) {
   const parts = [header(title)];
   if (Array.isArray(bodyLines)) {
@@ -216,42 +169,4 @@ module.exports = {
   formatAutomation,
   formatMonetization,
   formatSimpleMessage,
-};
-
-// utils/logger.js
-// Minimal structured logger. Keeps output readable in dev and greppable in prod.
-
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const CURRENT_LEVEL = LEVELS[process.env.LOG_LEVEL] ?? LEVELS.info;
-
-function timestamp() {
-  return new Date().toISOString();
-}
-
-function write(level, message, meta) {
-  if (LEVELS[level] < CURRENT_LEVEL) return;
-
-  const base = `[${timestamp()}] [${level.toUpperCase()}] ${message}`;
-
-  if (meta !== undefined) {
-    // Errors get their stack printed; everything else gets JSON-stringified.
-    if (meta instanceof Error) {
-      console.log(base, `\n${meta.stack || meta.message}`);
-    } else {
-      try {
-        console.log(base, JSON.stringify(meta));
-      } catch {
-        console.log(base, meta);
-      }
-    }
-  } else {
-    console.log(base);
-  }
-}
-
-module.exports = {
-  debug: (msg, meta) => write("debug", msg, meta),
-  info: (msg, meta) => write("info", msg, meta),
-  warn: (msg, meta) => write("warn", msg, meta),
-  error: (msg, meta) => write("error", msg, meta),
 };
