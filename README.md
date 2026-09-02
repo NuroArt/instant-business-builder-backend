@@ -23,7 +23,22 @@ utils/
   formatOutput.js            Converts kit JSON into Telegram MarkdownV2 messages
   logger.js                  Minimal structured logger
 .env                         Config (tokens, keys, port)
-package.json
+package.json {
+  "name": "instant-business-builder-backend",
+  "version": "1.0.0",
+  "description": "Telegram business builder bot backend",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}
+
 ```
 
 ## Setup
