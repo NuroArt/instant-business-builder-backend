@@ -77,6 +77,14 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
 
 // ---------------------------------------------------------------------------
 // Master prompt for the Instant Business Builder kit generator
+//
+// NOTE ON SIZE: the schema below is intentionally trimmed (12-15 content-calendar
+// items instead of a literal 30, 6-8 captions instead of 10-15, 4-5 reel scripts
+// instead of 5-10) and paired with an explicit token budget instruction. Without
+// these limits, Claude's response reliably exceeded the 8000-token max_tokens cap
+// and got cut off mid-JSON, which produced "Unterminated string" parse errors
+// downstream. formatOutput.js numbers calendar/email items dynamically off array
+// length, so shorter arrays render fine with no other code changes needed.
 // ---------------------------------------------------------------------------
 
 const MASTER_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
@@ -115,62 +123,12 @@ outside the JSON):
     "brandVoiceGuide": "string"
   },
   "marketing": {
-    "contentCalendar30Day": ["string", ...30 items, one per day],
-    "reelScripts": ["string", ...5-10 sample items],
+    "contentCalendar30Day": ["string", ...12-15 items, one per content idea, each under 10 words],
+    "reelScripts": ["string", ...4-5 sample items, each under 20 words],
     "carouselScripts": ["string", ...5 items],
-    "captions": ["string", ...10-15 sample items],
+    "captions": ["string", ...6-8 sample items, each under 15 words],
     "hashtagSets": { "broad": ["string"], "niche": ["string"], "branded": ["string"] },
     "emailWelcomeSequence": ["string", ...5 items],
     "leadMagnetConcept": "string"
   },
   "automation": {
-    "clientOnboarding": "string",
-    "contentAutomation": "string",
-    "salesFunnelAutomation": "string",
-    "leadCaptureAutomation": "string",
-    "weeklyOperations": "string"
-  },
-  "monetization": {
-    "pricingRecommendations": "string",
-    "salesAngles": ["string", ...3 items],
-    "funnelStrategy": "string",
-    "launchPlan": "string",
-    "growthRoadmap": "string"
-  }
-}
-
-Keep each string field concise but complete — a few sentences or a short list rendered as plain text
-with line breaks, not nested markdown. Arrays should contain short, punchy, ready-to-use lines.
-Do not include any text outside the single JSON object.`;
-
-/**
- * Generates a full business kit for a given niche.
- * @param {string} niche - raw user input describing their business idea
- * @returns {Promise<object>} parsed business kit object
- */
-async function generateBusinessKit(niche) {
-  const userPrompt = `Niche / business idea: "${niche}"\n\nGenerate the complete business kit as specified.`;
-
-  const raw = await callClaude(MASTER_SYSTEM_PROMPT, userPrompt, { maxTokens: 8000 });
-
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    // Claude occasionally wraps JSON in fences despite instructions — strip and retry parse.
-    const cleaned = raw.replace(/^```(json)?/m, "").replace(/```$/m, "").trim();
-    try {
-      return JSON.parse(cleaned);
-    } catch (secondErr) {
-      logger.error("Failed to parse Claude business kit response as JSON", {
-        error: secondErr.message,
-        rawPreview: raw.slice(0, 500),
-      });
-      throw new Error("BUSINESS_KIT_PARSE_ERROR");
-    }
-  }
-}
-
-module.exports = {
-  callClaude,
-  generateBusinessKit,
-};
