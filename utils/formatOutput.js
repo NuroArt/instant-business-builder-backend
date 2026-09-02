@@ -52,7 +52,7 @@ function formatProducts(data = {}) {
     parts.push("*Subscription Ideas:*\n" + bulletList(data.subscriptions));
   }
   if (data.automationOffers?.length) {
-    parts.push("*Automation-Ready Offers:*\n" + bulletList(data.automationOffers));
+       parts.push("*Automation\\-Ready Offers:*\n" + bulletList(data.automationOffers));
   }
   if (data.upsellsAndBundles?.length) {
     parts.push("*Upsells \\& Bundles:*\n" + bulletList(data.upsellsAndBundles));
@@ -81,7 +81,7 @@ function formatMarketing(data = {}) {
     const days = data.contentCalendar30Day
       .map((item, i) => `Day ${i + 1}: ${esc(item)}`)
       .join("\n");
-    parts.push("*30-Day Content Calendar:*\n" + days);
+        parts.push("*30\\-Day Content Calendar:*\n" + days);
   }
   if (data.reelScripts?.length) {
     parts.push("*Reel Scripts \\(sample\\):*\n" + bulletList(data.reelScripts));
