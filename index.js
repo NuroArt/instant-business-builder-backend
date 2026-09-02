@@ -17,6 +17,11 @@ const handleNiches = require("./handlers/niches");
 const settingsHandler = require("./handlers/settings");
 const handleSupport = require("./handlers/support");
 const handleRestart = require("./handlers/restart");
+const handleContentPack = require("./handlers/contentpack");
+const handleAutomationPack = require("./handlers/automationpack");
+const handleWebsitePack = require("./handlers/websitepack");
+const handleBrandingPack = require("./handlers/brandingpack");
+const { sendOfferDetail } = require("./handlers/offerDetail");
 
 const app = express();
 app.use(express.json());
@@ -36,6 +41,10 @@ const COMMANDS = {
   "/settings": (chatId) => settingsHandler.handleSettings(chatId),
   "/support": (chatId) => handleSupport(chatId),
   "/restart": (chatId) => handleRestart(chatId),
+  "/contentpack": (chatId) => handleContentPack(chatId),
+  "/automationpack": (chatId) => handleAutomationPack(chatId),
+  "/websitepack": (chatId) => handleWebsitePack(chatId),
+  "/brandingpack": (chatId) => handleBrandingPack(chatId),
 };
 
 /**
@@ -114,10 +123,7 @@ async function routeCallbackQuery(callbackQuery) {
   }
 
   if (data.startsWith("upgrade:")) {
-    await telegram.sendMessage(
-      chatId,
-      `Got it — message /support to unlock the *${data.split(":")[1]}* add\\-on\\.`
-    );
+    await sendOfferDetail(chatId, data.split(":")[1]);
     return;
   }
 
