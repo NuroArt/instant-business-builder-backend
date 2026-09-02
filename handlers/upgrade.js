@@ -14,7 +14,7 @@ async function handleUpgrade(chatId) {
   const message = [
     header("Premium Add-Ons"),
     esc("Full app access unlocks unlimited kit generations. Add-ons expand any kit with deeper, ready-to-use assets."),
-    "*Add-Ons:*\n" + bulletList(ADD_ONS),
+        "*Add\\-Ons:*\n" + bulletList(ADD_ONS),,
     esc("Bundle: Instant Business Builder + NuroWorks Website Launch System — priced below buying each separately."),
     esc("Contact /support for pricing and to unlock an add-on."),
   ].join("\n\n");
