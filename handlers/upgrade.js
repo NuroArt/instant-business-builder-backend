@@ -2,29 +2,23 @@
 
 const telegram = require("../telegram");
 const { header, esc, bulletList } = require("../utils/formatOutput");
-
-const ADD_ONS = [
-  "Content Pack — 90-day content calendar, 50 extra reel scripts, full caption library",
-  "Automation Pack — ready-to-import workflow templates for every automation in your kit",
-  "Website Pack — full multi-page website copy with SEO meta descriptions",
-  "Branding Pack — logo direction, color palette, typography system, brand guideline sheet",
-];
+const { OFFERS } = require("../utils/offers");
 
 async function handleUpgrade(chatId) {
+  const offerLines = OFFERS.map(
+    (offer) => `${offer.name} (${offer.price}) — ${offer.tagline} See ${offer.command} for details.`
+  );
+
   const message = [
     header("Premium Add-Ons"),
     esc("Full app access unlocks unlimited kit generations. Add-ons expand any kit with deeper, ready-to-use assets."),
-        "*Add\\-Ons:*\n" + bulletList(ADD_ONS),,
+    "*Add\\-Ons:*\n" + bulletList(offerLines),
     esc("Bundle: Instant Business Builder + NuroWorks Website Launch System — priced below buying each separately."),
-    esc("Contact /support for pricing and to unlock an add-on."),
   ].join("\n\n");
 
-  const buttons = [
-    [{ text: "Content Pack", callback_data: "upgrade:content" }],
-    [{ text: "Automation Pack", callback_data: "upgrade:automation" }],
-    [{ text: "Website Pack", callback_data: "upgrade:website" }],
-    [{ text: "Branding Pack", callback_data: "upgrade:branding" }],
-  ];
+  const buttons = OFFERS.map((offer) => [
+    { text: `${offer.name} — ${offer.price}`, callback_data: `upgrade:${offer.slug}` },
+  ]);
 
   await telegram.sendMessageWithButtons(chatId, message, buttons);
 }
