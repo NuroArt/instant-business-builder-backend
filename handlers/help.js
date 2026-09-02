@@ -10,7 +10,6 @@ async function handleHelp(chatId) {
     formatSimpleMessage("Other Commands", [
       "/examples — see a sample kit",
       "/niches — niche ideas if you're not sure where to start",
-      "/upgrade — premium add-on packs",
       "/settings — preferences",
       "/support — get help from a human",
       "/restart — clear your session and start over",
