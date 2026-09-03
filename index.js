@@ -5,8 +5,11 @@
 require("dotenv").config();
 
 const express = require("express");
+const path = require("path");
 const logger = require("./utils/logger");
 const telegram = require("./telegram");
+const stripeService = require("./stripe");
+const { getOffer } = require("./utils/offers");
 
 const handleStart = require("./handlers/start");
 const buildHandler = require("./handlers/build");
@@ -16,17 +19,75 @@ const handleNiches = require("./handlers/niches");
 const settingsHandler = require("./handlers/settings");
 const handleSupport = require("./handlers/support");
 const handleRestart = require("./handlers/restart");
-// NOTE: /upgrade, /contentpack, /automationpack, /websitepack, /brandingpack
-// are temporarily disabled until Payhip checkout is live — see handlers/upgrade.js,
-// handlers/contentpack.js, handlers/automationpack.js, handlers/websitepack.js,
-// handlers/brandingpack.js, and handlers/offerDetail.js (still present, just unused).
-// To re-enable: restore these requires, the COMMANDS entries below, and the
-// "upgrade:" callback_query handler.
+const handleUpgrade = require("./handlers/upgrade");
+const handleContentPack = require("./handlers/contentpack");
+const handleAutomationPack = require("./handlers/automationpack");
+const handleWebsitePack = require("./handlers/websitepack");
+const handleBrandingPack = require("./handlers/brandingpack");
+const { sendOfferDetail } = require("./handlers/offerDetail");
 
 const app = express();
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
+
+// Guards against double-delivering a file if Stripe retries the same webhook
+// event (which it does on occasion). In-memory only — resets on restart,
+// which just means a very rare retry right after a redeploy could in theory
+// cause a duplicate send. Low stakes (re-sending a file isn't harmful), so
+// this simple guard is enough for now rather than a persistent store.
+const processedStripeEventIds = new Set();
+
+// ---------------------------------------------------------------------------
+// Stripe webhook route MUST come before express.json() and must use the raw
+// body — Stripe's signature verification needs the exact, unparsed bytes.
+// On checkout.session.completed, delivers the purchased file directly to the
+// buyer's Telegram chat via sendDocument.
+// ---------------------------------------------------------------------------
+app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (req, res) => {
+  let event;
+
+  try {
+    event = stripeService.constructWebhookEvent(req.body, req.headers["stripe-signature"]);
+  } catch (err) {
+    logger.error("Stripe webhook signature verification failed", { error: err.message });
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === "checkout.session.completed") {
+    if (processedStripeEventIds.has(event.id)) {
+      logger.info("Skipping already-processed Stripe event", { eventId: event.id });
+      return res.json({ received: true });
+    }
+    processedStripeEventIds.add(event.id);
+
+    const session = event.data.object;
+    const chatId = session.metadata?.chatId;
+    const slug = session.metadata?.slug;
+    const offer = slug ? getOffer(slug) : null;
+
+    if (chatId && offer) {
+      const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+      const fileUrl = `${publicUrl}/products/${offer.fileName}`;
+      try {
+        await telegram.sendDocument(chatId, fileUrl, `Here's your ${offer.name} — thanks for your purchase!`);
+        logger.info("Delivered purchased file via Telegram", { chatId, slug });
+      } catch (err) {
+        logger.error("Failed to deliver purchased file via Telegram", { chatId, slug, error: err.message });
+      }
+    } else {
+      logger.warn("checkout.session.completed missing chatId/slug or unknown offer", {
+        chatId,
+        slug,
+        sessionId: session.id,
+      });
+    }
+  }
+
+  res.json({ received: true });
+});
+
+app.use(express.json());
+app.use("/products", express.static(path.join(__dirname, "products")));
+app.use(express.static(path.join(__dirname, "public")));
 
 // ---------------------------------------------------------------------------
 // Command routing table: command string -> async handler(chatId, args)
@@ -40,6 +101,11 @@ const COMMANDS = {
   "/settings": (chatId) => settingsHandler.handleSettings(chatId),
   "/support": (chatId) => handleSupport(chatId),
   "/restart": (chatId) => handleRestart(chatId),
+  "/upgrade": (chatId) => handleUpgrade(chatId),
+  "/contentpack": (chatId) => handleContentPack(chatId),
+  "/automationpack": (chatId) => handleAutomationPack(chatId),
+  "/websitepack": (chatId) => handleWebsitePack(chatId),
+  "/brandingpack": (chatId) => handleBrandingPack(chatId),
 };
 
 /**
@@ -117,11 +183,42 @@ async function routeCallbackQuery(callbackQuery) {
     return;
   }
 
+  if (data.startsWith("upgrade:")) {
+    await sendOfferDetail(chatId, data.split(":")[1]);
+    return;
+  }
+
+  if (data.startsWith("buy:")) {
+    const slug = data.split(":")[1];
+    const offer = getOffer(slug);
+
+    if (!offer) {
+      await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
+      return;
+    }
+
+    await telegram.sendTyping(chatId);
+
+    try {
+      const publicUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+      const session = await stripeService.createCheckoutSession({ chatId, slug, offer, publicUrl });
+      await telegram.sendMessageWithButtons(
+        chatId,
+        `Tap below to pay securely via Stripe\\. Your file arrives right here as soon as payment is confirmed\\.`,
+        [[{ text: `Pay ${offer.price}`, url: session.url }]]
+      );
+    } catch (err) {
+      logger.error("Failed to create Stripe checkout session for bot purchase", { chatId, slug, error: err.message });
+      await telegram.sendMessage(chatId, "Something went wrong starting checkout\\. Please try again in a moment, or contact /support\\.");
+    }
+    return;
+  }
+
   logger.warn("Unhandled callback_query data", { data });
 }
 
 // ---------------------------------------------------------------------------
-// Webhook endpoint
+// Telegram webhook endpoint
 // ---------------------------------------------------------------------------
 app.post("/webhook", async (req, res) => {
   // Respond to Telegram immediately — processing happens async so Telegram

@@ -124,6 +124,29 @@ async function sendMessageWithButtons(chatId, text, buttons) {
 }
 
 /**
+ * Sends a document (file) to a chat. `documentUrl` must be a real, publicly
+ * accessible HTTPS URL — Telegram fetches the file from that URL itself
+ * rather than requiring a multipart upload from us.
+ * @param {number|string} chatId
+ * @param {string} documentUrl
+ * @param {string} [caption]
+ */
+async function sendDocument(chatId, documentUrl, caption) {
+  try {
+    const payload = { chat_id: chatId, document: documentUrl };
+    if (caption) {
+      payload.caption = escapeMarkdownV2(caption);
+      payload.parse_mode = "MarkdownV2";
+    }
+    const res = await client.post("/sendDocument", payload);
+    return res.data;
+  } catch (err) {
+    logger.error("Telegram sendDocument failed", { chatId, error: err.response?.data || err.message });
+    throw err;
+  }
+}
+
+/**
  * Registers the webhook URL with Telegram. Call once on startup (or via a setup script).
  */
 async function setWebhook(publicUrl) {
@@ -136,6 +159,7 @@ async function setWebhook(publicUrl) {
 module.exports = {
   sendMessage,
   sendMessageWithButtons,
+  sendDocument,
   sendTyping,
   setWebhook,
   escapeMarkdownV2,
