@@ -10,7 +10,7 @@ async function handleStart(chatId) {
     esc(
       "Send /build and give me your niche or business idea. I'll generate a full starter kit: brand foundation, product suite, website copy, marketing system, automation workflows, and a monetization strategy."
     ),
-    `${esc("Commands:")}\n` +
+       `${esc("Commands:")}\n` +
       `${esc("/build")} — generate your business kit\n` +
       `${esc("/help")} — how this works\n` +
       `${esc("/examples")} — see a sample kit\n` +
@@ -18,6 +18,7 @@ async function handleStart(chatId) {
       `${esc("/settings")} — preferences\n` +
       `${esc("/support")} — get help\n` +
       `${esc("/restart")} — start over`,
+    `🌐 ${esc("For our full product lineup, visit:")} [www.nuroworks.com](https://www.nuroworks.com)`,
   ].join("\n\n");
 
   await telegram.sendMessage(chatId, message);
