@@ -1,12 +1,9 @@
 // utils/offers.js
 // Single source of truth for the four premium add-ons. Both /upgrade (the
 // summary list) and the dedicated per-offer commands (/contentpack, etc.)
-// read from this file, so pricing/copy only needs to be edited in one place.
-//
-// PLACEHOLDER PRICING: prices below are placeholders — update them once real
-// prices are set on Payhip. checkoutUrlEnv names the env var that will hold
-// the live Payhip checkout URL once it exists; until that env var is set,
-// offerDetail.js shows a "coming soon" message instead of a broken link.
+// read from this file. Each offer now maps to a real Stripe price (created
+// dynamically per purchase, tagged with the buyer's chatId) and a real file
+// that gets delivered automatically via Telegram once payment is confirmed.
 
 const OFFERS = [
   {
@@ -14,6 +11,7 @@ const OFFERS = [
     command: "/contentpack",
     name: "Content Pack",
     price: "$19",
+    priceCents: 1900,
     tagline: "A full quarter of content, done for you.",
     includes: [
       "90-day content calendar (full quarter, not just 30 days)",
@@ -22,13 +20,14 @@ const OFFERS = [
       "Seasonal and trending content ideas for your niche",
       "Repurposing templates to turn one post into five",
     ],
-    checkoutUrlEnv: "PAYHIP_CONTENT_URL",
+    fileName: "NuroWorks-Content-Pack.docx",
   },
   {
     slug: "automation",
     command: "/automationpack",
     name: "Automation Pack",
     price: "$19",
+    priceCents: 1900,
     tagline: "Every workflow in your kit, ready to import.",
     includes: [
       "Client onboarding automation, ready to import",
@@ -37,13 +36,14 @@ const OFFERS = [
       "Lead capture automation, ready to import",
       "Weekly operations checklist automation",
     ],
-    checkoutUrlEnv: "PAYHIP_AUTOMATION_URL",
+    fileName: "NuroWorks-Automation-Pack.docx",
   },
   {
     slug: "website",
     command: "/websitepack",
     name: "Website Pack",
     price: "$19",
+    priceCents: 1900,
     tagline: "A complete multi-page site, written and SEO-ready.",
     includes: [
       "Full copy for every core page — Home, About, Services, Contact, FAQ",
@@ -51,13 +51,14 @@ const OFFERS = [
       "Page-by-page structure guide",
       "Multiple call-to-action variations per page",
     ],
-    checkoutUrlEnv: "PAYHIP_WEBSITE_URL",
+    fileName: "NuroWorks-Website-Pack.docx",
   },
   {
     slug: "branding",
     command: "/brandingpack",
     name: "Branding Pack",
     price: "$19",
+    priceCents: 1900,
     tagline: "Your visual identity, defined in one sheet.",
     includes: [
       "Logo direction brief — style, mood, dos and don'ts",
@@ -65,7 +66,7 @@ const OFFERS = [
       "Typography system for headlines and body text",
       "One-page brand guideline sheet",
     ],
-    checkoutUrlEnv: "PAYHIP_BRANDING_URL",
+    fileName: "NuroWorks-Branding-Pack.docx",
   },
 ];
 

@@ -1,4 +1,5 @@
 // utils/logger.js
+// Minimal structured logger. Keeps output readable in dev and greppable in prod.
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 const CURRENT_LEVEL = LEVELS[process.env.LOG_LEVEL] ?? LEVELS.info;
@@ -13,6 +14,7 @@ function write(level, message, meta) {
   const base = `[${timestamp()}] [${level.toUpperCase()}] ${message}`;
 
   if (meta !== undefined) {
+    // Errors get their stack printed; everything else gets JSON-stringified.
     if (meta instanceof Error) {
       console.log(base, `\n${meta.stack || meta.message}`);
     } else {
