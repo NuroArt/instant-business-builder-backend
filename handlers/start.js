@@ -18,9 +18,9 @@ async function handleStart(chatId) {
       `${esc("/settings")} — preferences\n` +
       `${esc("/support")} — get help\n` +
       `${esc("/restart")} — start over`,
-    `🌐 ${esc("For our full product lineup, visit:")} [www.nuroworks.com](https://www.nuroworks.com)`,
+     `🌐 ${esc("For our full product lineup, visit:")} [www.nuroworks.com](https://www.nuroworks.com)`,
+    `✨ ${esc("Also try Instant Landing Page — generate a full website in minutes:")} [Try it here](https://l-page-gen.onrender.com)`,
   ].join("\n\n");
-
   await telegram.sendMessage(chatId, message);
 }
 
