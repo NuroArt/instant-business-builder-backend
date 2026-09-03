@@ -3,16 +3,16 @@
 // offer command (/contentpack, /automationpack, /websitepack, /brandingpack)
 // and by the inline buttons on /upgrade, so the message only needs to be
 // built in one place.
+//
+// The "Buy Now" button uses callback_data (not a static url) because we need
+// to create a fresh Stripe Checkout Session — tagged with this specific
+// chatId — at the moment of the tap, not ahead of time. See index.js's
+// "buy:" callback handler for what happens after the tap.
 
 const telegram = require("../telegram");
 const { header, esc, bulletList } = require("../utils/formatOutput");
 const { getOffer } = require("../utils/offers");
 
-/**
- * Sends the detail message for one offer by slug ("content", "automation",
- * "website", or "branding"). Includes a checkout button if a live Payhip URL
- * is configured for that offer; otherwise shows a "coming soon" note.
- */
 async function sendOfferDetail(chatId, slug) {
   const offer = getOffer(slug);
 
@@ -21,24 +21,16 @@ async function sendOfferDetail(chatId, slug) {
     return;
   }
 
-  const checkoutUrl = process.env[offer.checkoutUrlEnv];
-
   const message = [
     header(offer.name),
     esc(`${offer.tagline} — ${offer.price}`),
     "*What's included:*\n" + bulletList(offer.includes),
-    checkoutUrl
-      ? esc("Tap below to check out.")
-      : esc("Checkout isn't live yet — message /support to get on the list and I'll notify you the moment it's ready."),
+    esc("Tap below to check out securely via Stripe. Your file is delivered right here in this chat as soon as payment is confirmed."),
   ].join("\n\n");
 
-  if (checkoutUrl) {
-    await telegram.sendMessageWithButtons(chatId, message, [
-      [{ text: `Get ${offer.name} — ${offer.price}`, url: checkoutUrl }],
-    ]);
-  } else {
-    await telegram.sendMessage(chatId, message);
-  }
+  await telegram.sendMessageWithButtons(chatId, message, [
+    [{ text: `Buy Now — ${offer.price}`, callback_data: `buy:${offer.slug}` }],
+  ]);
 }
 
 module.exports = { sendOfferDetail };
