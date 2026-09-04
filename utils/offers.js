@@ -1,9 +1,13 @@
 // utils/offers.js
 // Single source of truth for the four premium add-ons. Both /upgrade (the
 // summary list) and the dedicated per-offer commands (/contentpack, etc.)
-// read from this file. Each offer now maps to a real Stripe price (created
-// dynamically per purchase, tagged with the buyer's chatId) and a real file
-// that gets delivered automatically via Telegram once payment is confirmed.
+// read from this file.
+//
+// Payment now goes through static Stripe Payment Links (created once,
+// manually, in the Stripe dashboard) rather than dynamically creating a
+// Checkout Session via the API at purchase time — see index.js's "buy:"
+// handler. Each link's base URL lives in an env var so test/live mode links
+// can be swapped without touching code.
 
 const OFFERS = [
   {
@@ -11,7 +15,6 @@ const OFFERS = [
     command: "/contentpack",
     name: "Content Pack",
     price: "$19",
-    priceCents: 1900,
     tagline: "A full quarter of content, done for you.",
     includes: [
       "90-day content calendar (full quarter, not just 30 days)",
@@ -21,13 +24,13 @@ const OFFERS = [
       "Repurposing templates to turn one post into five",
     ],
     fileName: "NuroWorks-Content-Pack.docx",
+    paymentLink: process.env.STRIPE_LINK_CONTENT,
   },
   {
     slug: "automation",
     command: "/automationpack",
     name: "Automation Pack",
     price: "$19",
-    priceCents: 1900,
     tagline: "Every workflow in your kit, ready to import.",
     includes: [
       "Client onboarding automation, ready to import",
@@ -37,13 +40,13 @@ const OFFERS = [
       "Weekly operations checklist automation",
     ],
     fileName: "NuroWorks-Automation-Pack.docx",
+    paymentLink: process.env.STRIPE_LINK_AUTOMATION,
   },
   {
     slug: "website",
     command: "/websitepack",
     name: "Website Pack",
     price: "$19",
-    priceCents: 1900,
     tagline: "A complete multi-page site, written and SEO-ready.",
     includes: [
       "Full copy for every core page — Home, About, Services, Contact, FAQ",
@@ -52,13 +55,13 @@ const OFFERS = [
       "Multiple call-to-action variations per page",
     ],
     fileName: "NuroWorks-Website-Pack.docx",
+    paymentLink: process.env.STRIPE_LINK_WEBSITE,
   },
   {
     slug: "branding",
     command: "/brandingpack",
     name: "Branding Pack",
     price: "$19",
-    priceCents: 1900,
     tagline: "Your visual identity, defined in one sheet.",
     includes: [
       "Logo direction brief — style, mood, dos and don'ts",
@@ -67,6 +70,7 @@ const OFFERS = [
       "One-page brand guideline sheet",
     ],
     fileName: "NuroWorks-Branding-Pack.docx",
+    paymentLink: process.env.STRIPE_LINK_BRANDING,
   },
 ];
 
