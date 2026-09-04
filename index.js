@@ -208,7 +208,16 @@ async function routeCallbackQuery(callbackQuery) {
         [[{ text: `Pay ${offer.price}`, url: session.url }]]
       );
     } catch (err) {
-      logger.error("Failed to create Stripe checkout session for bot purchase", { chatId, slug, error: err.message });
+      logger.error("Failed to create Stripe checkout session for bot purchase", {
+        chatId,
+        slug,
+        message: err.message,
+        type: err.type,
+        code: err.code,
+        statusCode: err.statusCode,
+        rawMessage: err.raw?.message,
+        rawType: err.raw?.type,
+      });
       await telegram.sendMessage(chatId, "Something went wrong starting checkout\\. Please try again in a moment, or contact /support\\.");
     }
     return;
