@@ -178,9 +178,9 @@ async function routeCallbackQuery(callbackQuery) {
       return;
     }
 
-    if (!offer.paymentLink) {
-      logger.error("No payment link configured for offer", { slug });
-      await telegram.sendMessage(chatId, "This add\\-on isn't available for purchase right now\\. Please contact /support\\.");
+      if (!offer.paymentLink) {
+      logger.error("No payment link configured for offer", { slug, paymentLinkValue: offer.paymentLink });
+      await telegram.sendMessage(chatId, `DEBUG v2 \\- offer\\.paymentLink is missing for slug: ${slug}\\. Please contact /support\\.`);
       return;
     }
 
