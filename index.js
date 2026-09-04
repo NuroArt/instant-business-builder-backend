@@ -169,8 +169,6 @@ async function routeCallbackQuery(callbackQuery) {
       return;
     }
 
-    await telegram.sendTyping(chatId);
-
     try {
       const publicUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
       const session = await stripeService.createCheckoutSession({ chatId, slug, offer, publicUrl });
@@ -227,10 +225,6 @@ app.post("/webhook", async (req, res) => {
     }
   }
 
-  // Respond only after processing finishes, instead of immediately — testing
-  // whether background work after an early ack is being throttled on this
-  // platform/tier, which would explain the Stripe calls succeeding as a
-  // direct request but failing when triggered from this webhook.
   res.sendStatus(200);
 });
 
