@@ -1,8 +1,6 @@
 // stripe.js
 // Thin wrapper around the Stripe SDK for creating a one-time checkout session
-// per (chatId, offer) pair, and verifying webhook signatures. Same pattern
-// used in the Instant Landing Page project — see that repo's stripe.js for
-// the original version this is adapted from.
+// per (chatId, offer) pair, and verifying webhook signatures.
 
 const Stripe = require("stripe");
 const logger = require("./utils/logger");
@@ -17,18 +15,15 @@ if (!STRIPE_WEBHOOK_SECRET) {
   logger.warn("STRIPE_WEBHOOK_SECRET is not set — webhook verification will fail until it is configured.");
 }
 
-const stripe = Stripe(STRIPE_SECRET_KEY || "sk_test_placeholder");
+// Explicit timeout + retry settings — added while diagnosing a persistent
+// StripeConnectionError on this service. A longer timeout and more retries
+// help distinguish a marginal/intermittent connection (which this fixes)
+// from a fully blocked one (which it won't).
+const stripe = Stripe(STRIPE_SECRET_KEY || "sk_test_placeholder", {
+  timeout: 20000,
+  maxNetworkRetries: 3,
+});
 
-/**
- * Creates a one-time Checkout Session for a specific buyer (identified by
- * their Telegram chatId) purchasing a specific offer. Both travel in
- * session metadata, so the webhook can identify who to deliver the file to.
- * @param {object} params
- * @param {number|string} params.chatId
- * @param {string} params.slug - offer slug, e.g. "content"
- * @param {object} params.offer - the offer object from utils/offers.js
- * @param {string} params.publicUrl - e.g. https://your-bot.onrender.com
- */
 async function createCheckoutSession({ chatId, slug, offer, publicUrl }) {
   const base = publicUrl.replace(/\/$/, "");
 
@@ -56,11 +51,6 @@ async function createCheckoutSession({ chatId, slug, offer, publicUrl }) {
   return session;
 }
 
-/**
- * Verifies and parses a webhook event from the raw request body + signature
- * header. Must be called with the RAW (unparsed) body — see index.js, which
- * uses express.raw() specifically for the webhook route.
- */
 function constructWebhookEvent(rawBody, signatureHeader) {
   return stripe.webhooks.constructEvent(rawBody, signatureHeader, STRIPE_WEBHOOK_SECRET);
 }
