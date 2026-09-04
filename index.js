@@ -1,6 +1,13 @@
 // index.js
 // Express server exposing the Telegram webhook endpoint and routing updates
 // to command handlers. No bot framework — Telegram updates are parsed manually.
+//
+// Payment: purchases go through static Stripe Payment Links (see
+// utils/offers.js) rather than a dynamically-created Checkout Session. The
+// bot just tags the pre-made link with `?client_reference_id=chatId:slug`
+// and sends it — no outbound Stripe API call happens during the Telegram
+// interaction at all. The webhook then reads that same client_reference_id
+// back off the completed session to know who to deliver the file to.
 
 require("dotenv").config();
 
@@ -49,8 +56,11 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
     processedStripeEventIds.add(event.id);
 
     const session = event.data.object;
-    const chatId = session.metadata?.chatId;
-    const slug = session.metadata?.slug;
+    // Payment Links pass the ?client_reference_id= query param straight
+    // through to the resulting Checkout Session — we encoded "chatId:slug"
+    // into it when building the link, so unpack both here.
+    const ref = session.client_reference_id || "";
+    const [chatId, slug] = ref.split(":");
     const offer = slug ? getOffer(slug) : null;
 
     if (chatId && offer) {
@@ -63,9 +73,8 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
         logger.error("Failed to deliver purchased file via Telegram", { chatId, slug, error: err.message });
       }
     } else {
-      logger.warn("checkout.session.completed missing chatId/slug or unknown offer", {
-        chatId,
-        slug,
+      logger.warn("checkout.session.completed missing/invalid client_reference_id or unknown offer", {
+        ref,
         sessionId: session.id,
       });
     }
@@ -169,27 +178,22 @@ async function routeCallbackQuery(callbackQuery) {
       return;
     }
 
-    try {
-      const publicUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
-      const session = await stripeService.createCheckoutSession({ chatId, slug, offer, publicUrl });
-      await telegram.sendMessageWithButtons(
-        chatId,
-        `Tap below to pay securely via Stripe\\. Your file arrives right here as soon as payment is confirmed\\.`,
-        [[{ text: `Pay ${offer.price}`, url: session.url }]]
-      );
-    } catch (err) {
-      logger.error("Failed to create Stripe checkout session for bot purchase", {
-        chatId,
-        slug,
-        message: err.message,
-        type: err.type,
-        code: err.code,
-        statusCode: err.statusCode,
-        rawMessage: err.raw?.message,
-        rawType: err.raw?.type,
-      });
-      await telegram.sendMessage(chatId, "Something went wrong starting checkout\\. Please try again in a moment, or contact /support\\.");
+    if (!offer.paymentLink) {
+      logger.error("No payment link configured for offer", { slug });
+      await telegram.sendMessage(chatId, "This add\\-on isn't available for purchase right now\\. Please contact /support\\.");
+      return;
     }
+
+    // No Stripe API call here — just tag the pre-made static Payment Link
+    // with who's buying (chatId) and what (slug), so the webhook can later
+    // read it straight back off the completed Checkout Session.
+    const checkoutUrl = `${offer.paymentLink}?client_reference_id=${encodeURIComponent(`${chatId}:${slug}`)}`;
+
+    await telegram.sendMessageWithButtons(
+      chatId,
+      `Tap below to pay securely via Stripe\\. Your file arrives right here as soon as payment is confirmed\\.`,
+      [[{ text: `Pay ${offer.price}`, url: checkoutUrl }]]
+    );
     return;
   }
 
@@ -226,28 +230,6 @@ app.post("/webhook", async (req, res) => {
   }
 
   res.sendStatus(200);
-});
-
-// TEMPORARY DIAGNOSTIC — calls Stripe directly from a normal request/response,
-// bypassing the Telegram webhook flow entirely. Remove once the connection
-// issue is resolved.
-app.get("/test-stripe", async (req, res) => {
-  try {
-    const session = await stripeService.createCheckoutSession({
-      chatId: "diagnostic-test",
-      slug: "content",
-      offer: { name: "Test", tagline: "Diagnostic", priceCents: 1900 },
-      publicUrl: process.env.PUBLIC_URL || `http://localhost:${PORT}`,
-    });
-    res.json({ success: true, url: session.url });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err.message,
-      type: err.type,
-      code: err.code,
-    });
-  }
 });
 
 // Simple health check for uptime monitoring / load balancer probes.
