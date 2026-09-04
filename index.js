@@ -29,19 +29,8 @@ const { sendOfferDetail } = require("./handlers/offerDetail");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Guards against double-delivering a file if Stripe retries the same webhook
-// event (which it does on occasion). In-memory only — resets on restart,
-// which just means a very rare retry right after a redeploy could in theory
-// cause a duplicate send. Low stakes (re-sending a file isn't harmful), so
-// this simple guard is enough for now rather than a persistent store.
 const processedStripeEventIds = new Set();
 
-// ---------------------------------------------------------------------------
-// Stripe webhook route MUST come before express.json() and must use the raw
-// body — Stripe's signature verification needs the exact, unparsed bytes.
-// On checkout.session.completed, delivers the purchased file directly to the
-// buyer's Telegram chat via sendDocument.
-// ---------------------------------------------------------------------------
 app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (req, res) => {
   let event;
 
@@ -89,9 +78,6 @@ app.use(express.json());
 app.use("/products", express.static(path.join(__dirname, "products")));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ---------------------------------------------------------------------------
-// Command routing table: command string -> async handler(chatId, args)
-// ---------------------------------------------------------------------------
 const COMMANDS = {
   "/start": (chatId) => handleStart(chatId),
   "/build": (chatId) => buildHandler.handleBuild(chatId),
@@ -108,34 +94,23 @@ const COMMANDS = {
   "/brandingpack": (chatId) => handleBrandingPack(chatId),
 };
 
-/**
- * Extracts the base command from message text, stripping any @BotName suffix
- * Telegram appends in group chats (e.g. "/build@InstantBizBot" -> "/build").
- */
 function parseCommand(text) {
   const match = text.match(/^(\/[a-zA-Z_]+)(@\S+)?/);
   return match ? match[1].toLowerCase() : null;
 }
 
-/**
- * Routes a plain text (non-command) message based on conversation state.
- */
 async function routeTextMessage(chatId, text) {
   if (buildHandler.isAwaitingNiche(chatId)) {
     await buildHandler.handleNicheInput(chatId, text);
     return;
   }
 
-  // No active flow expects free text — nudge the user toward a command.
   await telegram.sendMessage(
     chatId,
     "Not sure what you mean\\. Try /build to generate a business kit, or /help to see all commands\\."
   );
 }
 
-/**
- * Routes an incoming Telegram `message` update.
- */
 async function routeMessage(message) {
   const chatId = message.chat?.id;
   const text = message.text;
@@ -156,137 +131,4 @@ async function routeMessage(message) {
   if (command && !COMMANDS[command]) {
     await telegram.sendMessage(
       chatId,
-      "Unknown command\\. Try /help to see everything I can do\\."
-    );
-    return;
-  }
-
-  await routeTextMessage(chatId, text);
-}
-
-/**
- * Routes an incoming Telegram `callback_query` update (inline button presses).
- */
-async function routeCallbackQuery(callbackQuery) {
-  const chatId = callbackQuery.message?.chat?.id;
-  const data = callbackQuery.data || "";
-
-  if (!chatId) {
-    logger.warn("Received callback_query with no chat id, skipping", { callbackQuery });
-    return;
-  }
-
-  logger.info("Routing callback_query", { chatId, data });
-
-  if (data.startsWith("settings:")) {
-    await settingsHandler.handleSettingsCallback(chatId, data);
-    return;
-  }
-
-  if (data.startsWith("upgrade:")) {
-    await sendOfferDetail(chatId, data.split(":")[1]);
-    return;
-  }
-
-  if (data.startsWith("buy:")) {
-    const slug = data.split(":")[1];
-    const offer = getOffer(slug);
-
-    if (!offer) {
-      await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
-      return;
-    }
-
-    await telegram.sendTyping(chatId);
-
-    try {
-      const publicUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
-      const session = await stripeService.createCheckoutSession({ chatId, slug, offer, publicUrl });
-      await telegram.sendMessageWithButtons(
-        chatId,
-        `Tap below to pay securely via Stripe\\. Your file arrives right here as soon as payment is confirmed\\.`,
-        [[{ text: `Pay ${offer.price}`, url: session.url }]]
-      );
-    } catch (err) {
-      logger.error("Failed to create Stripe checkout session for bot purchase", {
-        chatId,
-        slug,
-        message: err.message,
-        type: err.type,
-        code: err.code,
-        statusCode: err.statusCode,
-        rawMessage: err.raw?.message,
-        rawType: err.raw?.type,
-      });
-      await telegram.sendMessage(chatId, "Something went wrong starting checkout\\. Please try again in a moment, or contact /support\\.");
-    }
-    return;
-  }
-
-  logger.warn("Unhandled callback_query data", { data });
-}
-
-// ---------------------------------------------------------------------------
-// Telegram webhook endpoint
-// ---------------------------------------------------------------------------
-app.post("/webhook", async (req, res) => {
-  // Respond to Telegram immediately — processing happens async so Telegram
-  // doesn't retry the update due to a slow Claude API call.
-  res.sendStatus(200);
-
-  const update = req.body;
-
-  try {
-    if (update.message) {
-      await routeMessage(update.message);
-    } else if (update.callback_query) {
-      await routeCallbackQuery(update.callback_query);
-    } else {
-      logger.debug("Received unhandled update type", { update });
-    }
-  } catch (err) {
-    logger.error("Unhandled error processing update", { error: err.message, stack: err.stack });
-
-    const chatId =
-      update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-
-    if (chatId) {
-      try {
-        await telegram.sendMessage(
-          chatId,
-          "Something went wrong on my end\\. Please try again, or use /support if it keeps happening\\."
-        );
-      } catch (sendErr) {
-        logger.error("Failed to send error notice to user", { error: sendErr.message });
-      }
-    }
-  }
-});
-
-// Simple health check for uptime monitoring / load balancer probes.
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
-});
-
-// ---------------------------------------------------------------------------
-// Startup
-// ---------------------------------------------------------------------------
-app.listen(PORT, () => {
-  logger.info(`Instant Business Builder backend listening on port ${PORT}`);
-
-  if (process.env.PUBLIC_URL) {
-    telegram
-      .setWebhook(process.env.PUBLIC_URL)
-      .catch((err) => logger.error("Failed to register webhook on startup", { error: err.message }));
-  } else {
-    logger.warn("PUBLIC_URL not set — webhook was not auto-registered. Set it manually via Telegram's setWebhook API.");
-  }
-});
-
-process.on("unhandledRejection", (reason) => {
-  logger.error("Unhandled promise rejection", { reason });
-});
-
-process.on("uncaughtException", (err) => {
-  logger.error("Uncaught exception", { error: err.message, stack: err.stack });
-});
+      "Unknown command\\.
