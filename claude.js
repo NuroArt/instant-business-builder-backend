@@ -76,14 +76,17 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// The full kit is split into TWO parallel Claude calls rather than one.
-// A single call covering all six modules (foundation, products, websiteCopy,
-// marketing, automation, monetization) previously produced JSON that got
-// truncated mid-string on longer niches — Claude hit the max_tokens cap
-// before finishing the object, so the response was invalid JSON. Splitting
-// into two smaller, independent calls keeps each one's required output well
-// under its cap, so both reliably finish cleanly. Do not revert this to a
-// single call — that's the bug this fixes.
+// The full kit is split into THREE parallel Claude calls, not two. An
+// earlier version used two calls (foundation+products+websiteCopy, and
+// marketing+automation+monetization combined) — that still occasionally
+// produced truncated JSON because the marketing module alone (a 30-day
+// content calendar, reel scripts, carousel scripts, captions, hashtag sets,
+// an email sequence, and a lead magnet) is large enough to exceed a shared
+// 4500-token budget on its own, before automation and monetization even get
+// a chance to finish. Marketing now gets its own dedicated call, and the
+// 30-day calendar is explicitly constrained to short one-line entries so it
+// can't balloon again. Do not recombine these calls — that's the bug this
+// fixes.
 // ---------------------------------------------------------------------------
 
 const PART1_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
@@ -130,7 +133,7 @@ Do not include any text outside the single JSON object. Stay within a 3500-token
 
 const PART2_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
 NuroWorks product. Given a single niche or business idea, you produce PART TWO of a complete business
-starter kit: marketing, automation, and monetization.
+starter kit: the marketing module only.
 
 Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
 Every line must be usable as-is by a real founder.
@@ -140,14 +143,36 @@ outside the JSON):
 
 {
   "marketing": {
-    "contentCalendar30Day": ["string", ...30 items, one per day],
-    "reelScripts": ["string", ...5-10 sample items],
+    "contentCalendar30Day": ["string", ...EXACTLY 30 items, one per day],
+    "reelScripts": ["string", ...5 sample items],
     "carouselScripts": ["string", ...5 items],
-    "captions": ["string", ...10-15 sample items],
+    "captions": ["string", ...10 sample items],
     "hashtagSets": { "broad": ["string"], "niche": ["string"], "branded": ["string"] },
     "emailWelcomeSequence": ["string", ...5 items],
     "leadMagnetConcept": "string"
-  },
+  }
+}
+
+CRITICAL LENGTH LIMIT: each entry in contentCalendar30Day MUST be a single short line of 8-15 words —
+a content idea or hook only (e.g. "Before/after transformation reel of a stained carpet"), NOT a full
+caption, script, or multi-sentence description. This field alone will overflow the response if entries
+run long, so brevity here is mandatory, not optional.
+
+Keep all other string fields concise but complete — a few sentences or a short list rendered as plain
+text with line breaks, not nested markdown. Do not include any text outside the single JSON object.
+Stay within a 4500-token output budget.`;
+
+const PART3_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
+NuroWorks product. Given a single niche or business idea, you produce PART THREE of a complete business
+starter kit: automation and monetization.
+
+Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
+Every line must be usable as-is by a real founder.
+
+You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
+outside the JSON):
+
+{
   "automation": {
     "clientOnboarding": "string",
     "contentAutomation": "string",
@@ -164,9 +189,9 @@ outside the JSON):
   }
 }
 
-Keep each string field concise but complete — a few sentences or a short list rendered as plain text
-with line breaks, not nested markdown. Arrays should contain short, punchy, ready-to-use lines.
-Do not include any text outside the single JSON object. Stay within a 3500-token output budget.`;
+Keep each string field concise but complete — a few sentences rendered as plain text with line breaks,
+not nested markdown. Do not include any text outside the single JSON object. Stay within a 3000-token
+output budget.`;
 
 function parseJsonResponse(raw, label) {
   try {
@@ -187,7 +212,7 @@ function parseJsonResponse(raw, label) {
 }
 
 /**
- * Generates a full business kit for a given niche, via two parallel Claude
+ * Generates a full business kit for a given niche, via three parallel Claude
  * calls (see comment above), merged into a single object.
  * @param {string} niche - raw user input describing their business idea
  * @returns {Promise<object>} parsed business kit object
@@ -195,15 +220,17 @@ function parseJsonResponse(raw, label) {
 async function generateBusinessKit(niche) {
   const userPrompt = `Niche / business idea: "${niche}"\n\nGenerate this part of the business kit as specified.`;
 
-  const [part1Raw, part2Raw] = await Promise.all([
+  const [part1Raw, part2Raw, part3Raw] = await Promise.all([
     callClaude(PART1_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
     callClaude(PART2_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
+    callClaude(PART3_SYSTEM_PROMPT, userPrompt, { maxTokens: 3500 }),
   ]);
 
   const part1 = parseJsonResponse(part1Raw, "part1");
   const part2 = parseJsonResponse(part2Raw, "part2");
+  const part3 = parseJsonResponse(part3Raw, "part3");
 
-  return { ...part1, ...part2 };
+  return { ...part1, ...part2, ...part3 };
 }
 
 module.exports = {
