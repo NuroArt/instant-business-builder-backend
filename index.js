@@ -231,6 +231,40 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
+// GET /download-info — verifies a completed Checkout Session (from a
+// Payment Link's after-completion redirect) and returns the download URL
+// for the purchased file. This is a plain HTTP GET, not triggered from
+// within the Telegram webhook flow, so it's a reliable primary delivery
+// path even when the Telegram sendDocument fetch fails or the service was
+// cold when the webhook fired.
+app.get("/download-info", async (req, res) => {
+  const sessionId = req.query.session_id;
+
+  if (!sessionId) {
+    return res.status(400).json({ paid: false, error: "Missing session_id" });
+  }
+
+  try {
+    const session = await stripeService.retrieveSession(sessionId);
+    const ref = session.client_reference_id || "";
+    const [, slug] = ref.split("_");
+    const offer = slug ? getOffer(slug) : null;
+
+    if (session.payment_status === "paid" && offer) {
+      return res.json({
+        paid: true,
+        offerName: offer.name,
+        downloadUrl: `/products/${offer.fileName}`,
+      });
+    }
+
+    res.json({ paid: false });
+  } catch (err) {
+    logger.error("Failed to verify session for direct download", { error: err.message });
+    res.status(500).json({ paid: false, error: "Could not verify payment" });
+  }
+});
+
 // Simple health check for uptime monitoring / load balancer probes.
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
