@@ -43,6 +43,14 @@ const PORT = process.env.PORT || 3000;
 
 const processedStripeEventIds = new Set();
 
+// Cache of confirmed-paid sessions, populated directly by the webhook (which
+// only needs to read the event Stripe already sent us — no outbound API call
+// required). The /download-info route checks this FIRST before falling back
+// to a live Stripe API call, since that live call has proven occasionally
+// unreliable on this specific hosting setup. Whichever path succeeds first
+// (webhook or live lookup) is enough — they don't both need to work.
+const paidSessions = new Map();
+
 app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (req, res) => {
   let event;
 
@@ -64,6 +72,10 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
     const ref = session.client_reference_id || "";
     const [chatId, slug] = ref.split("_");
     const offer = slug ? getOffer(slug) : null;
+
+    if (offer) {
+      paidSessions.set(session.id, { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` });
+    }
 
     if (chatId && offer) {
       const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
@@ -244,6 +256,18 @@ app.get("/download-info", async (req, res) => {
     return res.status(400).json({ paid: false, error: "Missing session_id" });
   }
 
+  // Check our own local cache first — populated directly by the webhook, no
+  // outbound Stripe call needed. This is the fast, reliable path.
+  const cached = paidSessions.get(sessionId);
+  if (cached) {
+    return res.json({ paid: true, offerName: cached.offerName, downloadUrl: cached.downloadUrl });
+  }
+
+  // Fall back to a live lookup only if the webhook hasn't arrived yet (or at
+  // all) for this session. This call has occasionally failed with a
+  // connection error on this hosting setup — if it fails, we simply report
+  // "not yet confirmed" rather than erroring, since the webhook may still
+  // arrive and populate the cache on a subsequent page refresh.
   try {
     const session = await stripeService.retrieveSession(sessionId);
     const ref = session.client_reference_id || "";
@@ -251,17 +275,15 @@ app.get("/download-info", async (req, res) => {
     const offer = slug ? getOffer(slug) : null;
 
     if (session.payment_status === "paid" && offer) {
-      return res.json({
-        paid: true,
-        offerName: offer.name,
-        downloadUrl: `/products/${offer.fileName}`,
-      });
+      const result = { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` };
+      paidSessions.set(sessionId, result);
+      return res.json({ paid: true, ...result });
     }
 
     res.json({ paid: false });
   } catch (err) {
-    logger.error("Failed to verify session for direct download", { error: err.message });
-    res.status(500).json({ paid: false, error: "Could not verify payment" });
+    logger.error("Live session verification failed, relying on webhook to populate cache", { error: err.message });
+    res.json({ paid: false });
   }
 });
 
