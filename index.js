@@ -56,9 +56,6 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
     processedStripeEventIds.add(event.id);
 
     const session = event.data.object;
-    // Payment Links pass the ?client_reference_id= query param straight
-    // through to the resulting Checkout Session — we encoded "chatId:slug"
-    // into it when building the link, so unpack both here.
     const ref = session.client_reference_id || "";
     const [chatId, slug] = ref.split(":");
     const offer = slug ? getOffer(slug) : null;
@@ -178,9 +175,10 @@ async function routeCallbackQuery(callbackQuery) {
       return;
     }
 
-      if (!offer.paymentLink) {
-      logger.error("No payment link configured for offer", { slug, paymentLinkValue: offer.paymentLink });
-      await telegram.sendMessage(chatId, `DEBUG v2 \\- offer\\.paymentLink is missing for slug: ${slug}\\. Please contact /support\\.`);
+    if (!offer.paymentLink) {
+      const rawEnvValue = process.env.STRIPE_LINK_CONTENT;
+      logger.error("No payment link configured for offer", { slug, rawEnvValue, offerKeys: Object.keys(offer) });
+      await telegram.sendMessage(chatId, `DEBUG v3: raw env is ${rawEnvValue || "UNDEFINED"} \\| offer keys are ${Object.keys(offer).join(",")}`);
       return;
     }
 
