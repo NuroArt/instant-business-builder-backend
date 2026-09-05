@@ -71,26 +71,43 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
     const session = event.data.object;
     const ref = session.client_reference_id || "";
     const [chatId, slug] = ref.split("_");
-    const offer = slug ? getOffer(slug) : null;
 
-    if (offer) {
-      paidSessions.set(session.id, { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` });
-    }
-
-    if (chatId && offer) {
-      const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
-      const fileUrl = `${publicUrl}/products/${offer.fileName}`;
+    if (slug === "buildunlock" && chatId) {
+      // Not a file purchase — this unlocks unlimited /build generations for
+      // this chatId going forward. See handlers/build.js.
+      buildHandler.markBuildUnlocked(chatId);
+      paidSessions.set(session.id, { isBuildUnlock: true });
       try {
-        await telegram.sendDocument(chatId, fileUrl, `Here's your ${offer.name} — thanks for your purchase!`);
-        logger.info("Delivered purchased file via Telegram", { chatId, slug });
+        await telegram.sendMessage(
+          chatId,
+          "🎉 Unlimited kit generations unlocked\\! Run /build anytime — no limits, ever\\."
+        );
+        logger.info("Unlocked unlimited builds via Telegram confirmation", { chatId });
       } catch (err) {
-        logger.error("Failed to deliver purchased file via Telegram", { chatId, slug, error: err.message });
+        logger.error("Failed to send build-unlock confirmation via Telegram", { chatId, error: err.message });
       }
     } else {
-      logger.warn("checkout.session.completed missing/invalid client_reference_id or unknown offer", {
-        ref,
-        sessionId: session.id,
-      });
+      const offer = slug ? getOffer(slug) : null;
+
+      if (offer) {
+        paidSessions.set(session.id, { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` });
+      }
+
+      if (chatId && offer) {
+        const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+        const fileUrl = `${publicUrl}/products/${offer.fileName}`;
+        try {
+          await telegram.sendDocument(chatId, fileUrl, `Here's your ${offer.name} — thanks for your purchase!`);
+          logger.info("Delivered purchased file via Telegram", { chatId, slug });
+        } catch (err) {
+          logger.error("Failed to deliver purchased file via Telegram", { chatId, slug, error: err.message });
+        }
+      } else {
+        logger.warn("checkout.session.completed missing/invalid client_reference_id or unknown offer", {
+          ref,
+          sessionId: session.id,
+        });
+      }
     }
   }
 
@@ -260,6 +277,9 @@ app.get("/download-info", async (req, res) => {
   // outbound Stripe call needed. This is the fast, reliable path.
   const cached = paidSessions.get(sessionId);
   if (cached) {
+    if (cached.isBuildUnlock) {
+      return res.json({ paid: true, isBuildUnlock: true });
+    }
     return res.json({ paid: true, offerName: cached.offerName, downloadUrl: cached.downloadUrl });
   }
 
@@ -271,7 +291,17 @@ app.get("/download-info", async (req, res) => {
   try {
     const session = await stripeService.retrieveSession(sessionId);
     const ref = session.client_reference_id || "";
-    const [, slug] = ref.split("_");
+    const [chatId, slug] = ref.split("_");
+
+    if (slug === "buildunlock") {
+      if (session.payment_status === "paid" && chatId) {
+        buildHandler.markBuildUnlocked(chatId);
+        paidSessions.set(sessionId, { isBuildUnlock: true });
+        return res.json({ paid: true, isBuildUnlock: true });
+      }
+      return res.json({ paid: false });
+    }
+
     const offer = slug ? getOffer(slug) : null;
 
     if (session.payment_status === "paid" && offer) {
