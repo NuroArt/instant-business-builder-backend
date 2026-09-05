@@ -176,9 +176,9 @@ async function routeCallbackQuery(callbackQuery) {
     }
 
     if (!offer.paymentLink) {
-      const rawEnvValue = process.env.STRIPE_LINK_CONTENT;
-      logger.error("No payment link configured for offer", { slug, rawEnvValue, offerKeys: Object.keys(offer) });
-      await telegram.sendMessage(chatId, `DEBUG v3: raw env is ${rawEnvValue || "UNDEFINED"} \\| offer keys are ${Object.keys(offer).join(",")}`);
+      const allStripeKeys = Object.keys(process.env).filter((k) => k.includes("STRIPE"));
+      logger.error("No payment link configured for offer", { slug, allStripeKeys });
+      await telegram.sendMessage(chatId, `DEBUG v4: all env keys containing STRIPE are: ${allStripeKeys.join(", ") || "NONE FOUND"}`);
       return;
     }
 
