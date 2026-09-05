@@ -4,10 +4,15 @@
 //
 // Payment: purchases go through static Stripe Payment Links (see
 // utils/offers.js) rather than a dynamically-created Checkout Session. The
-// bot just tags the pre-made link with `?client_reference_id=chatId:slug`
+// bot just tags the pre-made link with `?client_reference_id=chatId_slug`
 // and sends it — no outbound Stripe API call happens during the Telegram
 // interaction at all. The webhook then reads that same client_reference_id
 // back off the completed session to know who to deliver the file to.
+//
+// IMPORTANT: client_reference_id may only contain alphanumeric characters,
+// dashes, or underscores — Stripe silently drops the entire value if it
+// contains anything else (like a colon). That's why chatId and slug are
+// joined with "_", not ":".
 
 require("dotenv").config();
 
@@ -57,7 +62,7 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
 
     const session = event.data.object;
     const ref = session.client_reference_id || "";
-    const [chatId, slug] = ref.split(":");
+    const [chatId, slug] = ref.split("_");
     const offer = slug ? getOffer(slug) : null;
 
     if (chatId && offer) {
@@ -176,16 +181,12 @@ async function routeCallbackQuery(callbackQuery) {
     }
 
     if (!offer.paymentLink) {
-      const allStripeKeys = Object.keys(process.env).filter((k) => k.includes("STRIPE"));
-      logger.error("No payment link configured for offer", { slug, allStripeKeys });
-      await telegram.sendMessage(chatId, `DEBUG v4: all env keys containing STRIPE are: ${allStripeKeys.join(", ") || "NONE FOUND"}`);
+      logger.error("No payment link configured for offer", { slug });
+      await telegram.sendMessage(chatId, "This add\\-on isn't available for purchase right now\\. Please contact /support\\.");
       return;
     }
 
-    // No Stripe API call here — just tag the pre-made static Payment Link
-    // with who's buying (chatId) and what (slug), so the webhook can later
-    // read it straight back off the completed Checkout Session.
-    const checkoutUrl = `${offer.paymentLink}?client_reference_id=${encodeURIComponent(`${chatId}:${slug}`)}`;
+    const checkoutUrl = `${offer.paymentLink}?client_reference_id=${chatId}_${slug}`;
 
     await telegram.sendMessageWithButtons(
       chatId,
