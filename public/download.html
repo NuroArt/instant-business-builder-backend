@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Download — NuroWorks</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #F7F6FC;
+      color: #1B1F3B;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      text-align: center;
+      padding: 2rem;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #E4E1F5;
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      max-width: 26rem;
+    }
+    h1 { font-size: 1.6rem; margin: 0 0 0.75rem; }
+    p { color: #44475A; margin: 0 0 1.5rem; }
+    a.button {
+      display: inline-block;
+      background: #5B3FE0;
+      color: #fff;
+      padding: 0.85rem 1.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    a.telegram-link {
+      display: block;
+      margin-top: 1.25rem;
+      color: #5B3FE0;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card" id="content">
+    <h1>Confirming your payment...</h1>
+    <p>This only takes a second.</p>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    const content = document.getElementById('content');
+
+    async function loadDownload() {
+      if (!sessionId) {
+        content.innerHTML = '<h1>Something went wrong</h1><p>No payment session found. If you were just charged, contact support and we\'ll sort it out.</p>';
+        return;
+      }
+
+      try {
+        const res = await fetch(`/download-info?session_id=${encodeURIComponent(sessionId)}`);
+        const data = await res.json();
+
+        if (res.ok && data.paid && data.downloadUrl) {
+          content.innerHTML = `
+            <h1>Your ${data.offerName} is ready 🎉</h1>
+            <p>Click below to download it now — you can also save this page and come back to it anytime.</p>
+            <a class="button" href="${data.downloadUrl}">Download ${data.offerName}</a>
+            <a class="telegram-link" href="https://t.me">We also tried sending it in your Telegram chat — check there too!</a>
+          `;
+        } else {
+          content.innerHTML = '<h1>Payment not confirmed yet</h1><p>If you just paid, give it a moment and refresh this page. If this persists, contact support.</p>';
+        }
+      } catch (err) {
+        content.innerHTML = '<h1>Something went wrong</h1><p>Couldn\'t confirm your payment. Please refresh this page.</p>';
+      }
+    }
+
+    loadDownload();
+  </script>
+</body>
+</html>
