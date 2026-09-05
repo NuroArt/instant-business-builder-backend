@@ -76,11 +76,19 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Master prompt for the Instant Business Builder kit generator
+// The full kit is split into TWO parallel Claude calls rather than one.
+// A single call covering all six modules (foundation, products, websiteCopy,
+// marketing, automation, monetization) previously produced JSON that got
+// truncated mid-string on longer niches — Claude hit the max_tokens cap
+// before finishing the object, so the response was invalid JSON. Splitting
+// into two smaller, independent calls keeps each one's required output well
+// under its cap, so both reliably finish cleanly. Do not revert this to a
+// single call — that's the bug this fixes.
 // ---------------------------------------------------------------------------
 
-const MASTER_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
-NuroWorks product. Given a single niche or business idea, you produce a complete business starter kit.
+const PART1_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
+NuroWorks product. Given a single niche or business idea, you produce PART ONE of a complete business
+starter kit: foundation, products, and website copy.
 
 Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
 Every line must be usable as-is by a real founder.
@@ -113,7 +121,24 @@ outside the JSON):
     "ctaLines": ["string", ...5 items],
     "taglines": ["string", ...5 items],
     "brandVoiceGuide": "string"
-  },
+  }
+}
+
+Keep each string field concise but complete — a few sentences or a short list rendered as plain text
+with line breaks, not nested markdown. Arrays should contain short, punchy, ready-to-use lines.
+Do not include any text outside the single JSON object. Stay within a 3500-token output budget.`;
+
+const PART2_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
+NuroWorks product. Given a single niche or business idea, you produce PART TWO of a complete business
+starter kit: marketing, automation, and monetization.
+
+Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
+Every line must be usable as-is by a real founder.
+
+You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
+outside the JSON):
+
+{
   "marketing": {
     "contentCalendar30Day": ["string", ...30 items, one per day],
     "reelScripts": ["string", ...5-10 sample items],
@@ -141,18 +166,9 @@ outside the JSON):
 
 Keep each string field concise but complete — a few sentences or a short list rendered as plain text
 with line breaks, not nested markdown. Arrays should contain short, punchy, ready-to-use lines.
-Do not include any text outside the single JSON object.`;
+Do not include any text outside the single JSON object. Stay within a 3500-token output budget.`;
 
-/**
- * Generates a full business kit for a given niche.
- * @param {string} niche - raw user input describing their business idea
- * @returns {Promise<object>} parsed business kit object
- */
-async function generateBusinessKit(niche) {
-  const userPrompt = `Niche / business idea: "${niche}"\n\nGenerate the complete business kit as specified.`;
-
-  const raw = await callClaude(MASTER_SYSTEM_PROMPT, userPrompt, { maxTokens: 8000 });
-
+function parseJsonResponse(raw, label) {
   try {
     return JSON.parse(raw);
   } catch (err) {
@@ -161,13 +177,33 @@ async function generateBusinessKit(niche) {
     try {
       return JSON.parse(cleaned);
     } catch (secondErr) {
-      logger.error("Failed to parse Claude business kit response as JSON", {
+      logger.error(`Failed to parse Claude business kit response as JSON (${label})`, {
         error: secondErr.message,
         rawPreview: raw.slice(0, 500),
       });
       throw new Error("BUSINESS_KIT_PARSE_ERROR");
     }
   }
+}
+
+/**
+ * Generates a full business kit for a given niche, via two parallel Claude
+ * calls (see comment above), merged into a single object.
+ * @param {string} niche - raw user input describing their business idea
+ * @returns {Promise<object>} parsed business kit object
+ */
+async function generateBusinessKit(niche) {
+  const userPrompt = `Niche / business idea: "${niche}"\n\nGenerate this part of the business kit as specified.`;
+
+  const [part1Raw, part2Raw] = await Promise.all([
+    callClaude(PART1_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
+    callClaude(PART2_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
+  ]);
+
+  const part1 = parseJsonResponse(part1Raw, "part1");
+  const part2 = parseJsonResponse(part2Raw, "part2");
+
+  return { ...part1, ...part2 };
 }
 
 module.exports = {
