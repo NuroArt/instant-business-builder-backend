@@ -15,7 +15,7 @@ if (!CLAUDE_API_KEY) {
 
 const client = axios.create({
   baseURL: CLAUDE_API_URL,
-  timeout: 120000, // generation can take a while for a full business kit
+  timeout: 240000, // generation can take a while for a full business kit
   headers: {
     "x-api-key": CLAUDE_API_KEY,
     "anthropic-version": ANTHROPIC_VERSION,
