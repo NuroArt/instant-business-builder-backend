@@ -47,6 +47,19 @@ function freeUsedKey(chatId) {
   return `build_free_used:${chatId}`;
 }
 
+function lastStartKey(chatId) {
+  return `build_last_start:${chatId}`;
+}
+
+// Minimum time between generation STARTS for the same chatId, regardless of
+// unlock status. This protects against rapid-fire spam (accidental
+// double-taps, or someone scripting requests directly at the webhook) —
+// each generation costs real Claude API money the moment it starts, so this
+// throttle applies even to paying/unlocked users. A normal person never
+// needs to start a second kit within a minute of starting the first one,
+// since generation itself takes at least that long to finish anyway.
+const BUILD_COOLDOWN_MS = 60 * 1000;
+
 async function isBuildUnlocked(chatId) {
   const value = await store.getValue(unlockKey(chatId));
   return value === "1";
@@ -116,6 +129,22 @@ async function handleNicheInput(chatId, niche) {
     );
     return;
   }
+
+  const lastStartRaw = await store.getValue(lastStartKey(chatId));
+  const lastStart = lastStartRaw ? Number(lastStartRaw) : 0;
+  const elapsed = Date.now() - lastStart;
+
+  if (elapsed < BUILD_COOLDOWN_MS) {
+    const waitSeconds = Math.ceil((BUILD_COOLDOWN_MS - elapsed) / 1000);
+    sessionState.delete(chatId);
+    await telegram.sendMessage(
+      chatId,
+      esc(`Please wait about ${waitSeconds} more second${waitSeconds === 1 ? "" : "s"} before starting another kit.`)
+    );
+    return;
+  }
+
+  await store.setValue(lastStartKey(chatId), String(Date.now()));
 
   sessionState.set(chatId, "generating");
   await telegram.sendMessage(
