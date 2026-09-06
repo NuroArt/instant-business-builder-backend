@@ -2,23 +2,30 @@
 // Handles the /build command and the follow-up free-text niche message.
 //
 // Usage limit: each chatId gets 1 free kit generation. After that, /build
-// shows a paywall with a one-time $14 Stripe Payment Link that unlocks
+// shows a paywall with a one-time $19 Stripe Payment Link that unlocks
 // unlimited future generations for that chatId, forever. Same static
 // Payment Link + client_reference_id pattern as the four premium packs —
 // see index.js's webhook handler for how the "buildunlock" purchase gets
 // recognized and applied (it doesn't deliver a file, it just flips a flag).
+//
+// Free-build-used and unlock status are stored in Redis (see utils/store.js),
+// NOT in a plain in-memory Map — a customer who pays $19 must not lose that
+// unlock the next time this service redeploys or spins down from
+// inactivity. Session state for the /build conversation itself (which step
+// they're on right now) stays in-memory, since losing that mid-conversation
+// just means re-running /build, which is a minor inconvenience rather than
+// a paid feature silently disappearing.
 
 const telegram = require("../telegram");
 const claude = require("../claude");
 const logger = require("../utils/logger");
+const store = require("../utils/store");
 const { formatBusinessKit, header, esc } = require("../utils/formatOutput");
 
 const sessionState = new Map();
-const freeBuildUsed = new Map(); // chatId -> boolean
-const buildUnlocked = new Map(); // chatId -> boolean
 
 const BUILD_UNLOCK_SLUG = "buildunlock";
-const BUILD_UNLOCK_PRICE = "$14";
+const BUILD_UNLOCK_PRICE = "$19";
 const BUILD_UNLOCK_LINK = process.env.STRIPE_LINK_BUILD_UNLOCK;
 
 const PROGRESS_STAGES = [
@@ -31,21 +38,31 @@ const PROGRESS_STAGES = [
   "Finalizing monetization strategy",
 ];
 
-function isBuildUnlocked(chatId) {
-  return buildUnlocked.get(chatId) === true;
+function unlockKey(chatId) {
+  return `build_unlocked:${chatId}`;
+}
+
+function freeUsedKey(chatId) {
+  return `build_free_used:${chatId}`;
+}
+
+async function isBuildUnlocked(chatId) {
+  const value = await store.getValue(unlockKey(chatId));
+  return value === "1";
 }
 
 /** Called by index.js's Stripe webhook handler once a "buildunlock" purchase completes. */
-function markBuildUnlocked(chatId) {
-  buildUnlocked.set(chatId, true);
+async function markBuildUnlocked(chatId) {
+  await store.setValue(unlockKey(chatId), "1");
 }
 
-function hasUsedFreeBuild(chatId) {
-  return freeBuildUsed.get(chatId) === true;
+async function hasUsedFreeBuild(chatId) {
+  const value = await store.getValue(freeUsedKey(chatId));
+  return value === "1";
 }
 
-function consumeFreeBuild(chatId) {
-  freeBuildUsed.set(chatId, true);
+async function consumeFreeBuild(chatId) {
+  await store.setValue(freeUsedKey(chatId), "1");
 }
 
 async function sendBuildPaywall(chatId) {
@@ -71,7 +88,9 @@ async function sendBuildPaywall(chatId) {
 }
 
 async function handleBuild(chatId) {
-  if (!isBuildUnlocked(chatId) && hasUsedFreeBuild(chatId)) {
+  const [unlocked, freeUsed] = await Promise.all([isBuildUnlocked(chatId), hasUsedFreeBuild(chatId)]);
+
+  if (!unlocked && freeUsed) {
     await sendBuildPaywall(chatId);
     return;
   }
@@ -120,8 +139,9 @@ async function handleNicheInput(chatId, niche) {
 
     // Only consume the free build credit on a genuinely successful delivery —
     // a failed/timed-out attempt shouldn't cost the user their free try.
-    if (!isBuildUnlocked(chatId)) {
-      consumeFreeBuild(chatId);
+    const unlocked = await isBuildUnlocked(chatId);
+    if (!unlocked) {
+      await consumeFreeBuild(chatId);
     }
 
     await telegram.sendMessage(
@@ -130,7 +150,7 @@ async function handleNicheInput(chatId, niche) {
         header("Kit Complete"),
         esc("Your business starter kit is ready above."),
         esc("Want more? /upgrade unlocks the Content Pack, Automation Pack, Website Pack, and Branding Pack."),
-        isBuildUnlocked(chatId)
+        unlocked
           ? esc("Run /build again anytime to generate a kit for a different niche.")
           : esc("Your free kit generation has been used — run /build again to unlock unlimited future kits."),
       ].join("\n\n")
