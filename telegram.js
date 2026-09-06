@@ -147,6 +147,61 @@ async function sendDocument(chatId, documentUrl, caption) {
 }
 
 /**
+ * Sends a Telegram Stars invoice for a digital good — no payment provider
+ * needed (provider_token is intentionally empty) since Stars purchases are
+ * handled entirely by Telegram itself. currency is always "XTR" (Telegram's
+ * code for Stars); prices are in whole Stars, not fractional/smallest units.
+ * @param {number|string} chatId
+ * @param {string} title
+ * @param {string} description
+ * @param {string} payload - identifies what's being purchased; echoed back
+ *   unchanged in the pre_checkout_query and successful_payment updates, so
+ *   we know what to deliver once payment completes.
+ * @param {number} starsAmount - price in whole Telegram Stars
+ */
+async function sendInvoice(chatId, title, description, payload, starsAmount) {
+  try {
+    const res = await client.post("/sendInvoice", {
+      chat_id: chatId,
+      title,
+      description,
+      payload,
+      provider_token: "",
+      currency: "XTR",
+      prices: [{ label: title, amount: starsAmount }],
+    });
+    return res.data;
+  } catch (err) {
+    logger.error("Telegram sendInvoice failed", { chatId, error: err.response?.data || err.message });
+    throw err;
+  }
+}
+
+/**
+ * Responds to a pre_checkout_query. Telegram requires this within 10 seconds
+ * of the query being sent, or the transaction is automatically cancelled.
+ * @param {string} preCheckoutQueryId
+ * @param {boolean} ok
+ * @param {string} [errorMessage] - shown to the user if ok is false
+ */
+async function answerPreCheckoutQuery(preCheckoutQueryId, ok, errorMessage) {
+  try {
+    const payload = { pre_checkout_query_id: preCheckoutQueryId, ok };
+    if (!ok && errorMessage) {
+      payload.error_message = errorMessage;
+    }
+    const res = await client.post("/answerPreCheckoutQuery", payload);
+    return res.data;
+  } catch (err) {
+    logger.error("Telegram answerPreCheckoutQuery failed", {
+      preCheckoutQueryId,
+      error: err.response?.data || err.message,
+    });
+    throw err;
+  }
+}
+
+/**
  * Registers the webhook URL with Telegram. Call once on startup (or via a setup script).
  */
 async function setWebhook(publicUrl) {
@@ -161,6 +216,8 @@ module.exports = {
   sendMessageWithButtons,
   sendDocument,
   sendTyping,
+  sendInvoice,
+  answerPreCheckoutQuery,
   setWebhook,
   escapeMarkdownV2,
   chunkMessage,
