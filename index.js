@@ -75,7 +75,7 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
     if (slug === "buildunlock" && chatId) {
       // Not a file purchase — this unlocks unlimited /build generations for
       // this chatId going forward. See handlers/build.js.
-      buildHandler.markBuildUnlocked(chatId);
+      await buildHandler.markBuildUnlocked(chatId);
       paidSessions.set(session.id, { isBuildUnlock: true });
       try {
         await telegram.sendMessage(
@@ -319,7 +319,7 @@ app.get("/download-info", async (req, res) => {
 
     if (slug === "buildunlock") {
       if (session.payment_status === "paid" && chatId) {
-        buildHandler.markBuildUnlocked(chatId);
+        await buildHandler.markBuildUnlocked(chatId);
         paidSessions.set(sessionId, { isBuildUnlock: true });
         return res.json({ paid: true, isBuildUnlock: true });
       }
