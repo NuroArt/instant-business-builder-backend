@@ -228,36 +228,60 @@ async function routeCallbackQuery(callbackQuery) {
   logger.warn("Unhandled callback_query data", { data });
 }
 
-app.post("/webhook", async (req, res) => {
+// Respond to Telegram immediately, before any processing. Telegram expects a
+// fast acknowledgment on webhooks — if a slow handler (like business kit
+// generation, which can take a minute or more) blocks the response, Telegram
+// assumes delivery failed and redelivers the SAME update. That duplicate
+// then arrives while the original is still mid-processing, races against it,
+// and typically lands after session state has already moved on — which is
+// what caused the recurring "Not sure what you mean" replies after /build.
+// Acknowledging immediately and doing the real work afterward, detached from
+// the response, avoids this entirely.
+const processedTelegramUpdateIds = new Set();
+
+app.post("/webhook", (req, res) => {
+  res.sendStatus(200);
+
   const update = req.body;
 
-  try {
-    if (update.message) {
-      await routeMessage(update.message);
-    } else if (update.callback_query) {
-      await routeCallbackQuery(update.callback_query);
-    } else {
-      logger.debug("Received unhandled update type", { update });
+  // Guard against duplicate delivery of the same update (whether from a
+  // Telegram-side retry or any other cause) racing against in-progress
+  // session state for slow operations like business kit generation.
+  if (update.update_id !== undefined) {
+    if (processedTelegramUpdateIds.has(update.update_id)) {
+      logger.info("Skipping already-processed Telegram update", { updateId: update.update_id });
+      return;
     }
-  } catch (err) {
-    logger.error("Unhandled error processing update", { error: err.message, stack: err.stack });
-
-    const chatId =
-      update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-
-    if (chatId) {
-      try {
-        await telegram.sendMessage(
-          chatId,
-          "Something went wrong on my end\\. Please try again, or use /support if it keeps happening\\."
-        );
-      } catch (sendErr) {
-        logger.error("Failed to send error notice to user", { error: sendErr.message });
-      }
-    }
+    processedTelegramUpdateIds.add(update.update_id);
   }
 
-  res.sendStatus(200);
+  (async () => {
+    try {
+      if (update.message) {
+        await routeMessage(update.message);
+      } else if (update.callback_query) {
+        await routeCallbackQuery(update.callback_query);
+      } else {
+        logger.debug("Received unhandled update type", { update });
+      }
+    } catch (err) {
+      logger.error("Unhandled error processing update", { error: err.message, stack: err.stack });
+
+      const chatId =
+        update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+
+      if (chatId) {
+        try {
+          await telegram.sendMessage(
+            chatId,
+            "Something went wrong on my end\\. Please try again, or use /support if it keeps happening\\."
+          );
+        } catch (sendErr) {
+          logger.error("Failed to send error notice to user", { error: sendErr.message });
+        }
+      }
+    }
+  })();
 });
 
 // GET /download-info — verifies a completed Checkout Session (from a
