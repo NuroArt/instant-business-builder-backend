@@ -26,6 +26,7 @@ const sessionState = new Map();
 
 const BUILD_UNLOCK_SLUG = "buildunlock";
 const BUILD_UNLOCK_PRICE = "$19";
+const BUILD_UNLOCK_STARS = 850;
 const BUILD_UNLOCK_LINK = process.env.STRIPE_LINK_BUILD_UNLOCK;
 
 const PROGRESS_STAGES = [
@@ -84,6 +85,7 @@ async function sendBuildPaywall(chatId) {
 
   await telegram.sendMessageWithButtons(chatId, message, [
     [{ text: `Unlock Unlimited Builds — ${BUILD_UNLOCK_PRICE}`, url: checkoutUrl }],
+    [{ text: `⭐ Unlock with ${BUILD_UNLOCK_STARS} Stars`, callback_data: `buystars:${BUILD_UNLOCK_SLUG}` }],
   ]);
 }
 
