@@ -13,16 +13,16 @@
 // dashes, or underscores — Stripe silently drops the entire value if it
 // contains anything else (like a colon). That's why chatId and slug are
 // joined with "_", not ":".
-
+ 
 require("dotenv").config();
-
+ 
 const express = require("express");
 const path = require("path");
 const logger = require("./utils/logger");
 const telegram = require("./telegram");
 const stripeService = require("./stripe");
 const { getOffer } = require("./utils/offers");
-
+ 
 const handleStart = require("./handlers/start");
 const buildHandler = require("./handlers/build");
 const handleHelp = require("./handlers/help");
@@ -37,12 +37,13 @@ const handleAutomationPack = require("./handlers/automationpack");
 const handleWebsitePack = require("./handlers/websitepack");
 const handleBrandingPack = require("./handlers/brandingpack");
 const { sendOfferDetail } = require("./handlers/offerDetail");
-
+const landingPageHandler = require("./handlers/landingpage");
+ 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
+ 
 const processedStripeEventIds = new Set();
-
+ 
 // Cache of confirmed-paid sessions, populated directly by the webhook (which
 // only needs to read the event Stripe already sent us — no outbound API call
 // required). The /download-info route checks this FIRST before falling back
@@ -50,29 +51,45 @@ const processedStripeEventIds = new Set();
 // unreliable on this specific hosting setup. Whichever path succeeds first
 // (webhook or live lookup) is enough — they don't both need to work.
 const paidSessions = new Map();
-
+ 
 app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (req, res) => {
   let event;
-
+ 
   try {
     event = stripeService.constructWebhookEvent(req.body, req.headers["stripe-signature"]);
   } catch (err) {
     logger.error("Stripe webhook signature verification failed", { error: err.message });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-
+ 
   if (event.type === "checkout.session.completed") {
     if (processedStripeEventIds.has(event.id)) {
       logger.info("Skipping already-processed Stripe event", { eventId: event.id });
       return res.json({ received: true });
     }
     processedStripeEventIds.add(event.id);
-
+ 
     const session = event.data.object;
     const ref = session.client_reference_id || "";
     const [chatId, slug] = ref.split("_");
-
-    if (slug === "buildunlock" && chatId) {
+ 
+    if (slug && slug.startsWith(landingPageHandler.LANDING_PAGE_SLUG_PREFIX) && chatId) {
+      const generationId = slug.slice(landingPageHandler.LANDING_PAGE_SLUG_PREFIX.length);
+      const gen = landingPageHandler.markPaid(generationId);
+      if (gen) {
+        paidSessions.set(session.id, { isLandingPage: true, generationId });
+        const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+        const fileUrl = `${publicUrl}/landingpage-download/${generationId}`;
+        try {
+          await telegram.sendDocument(chatId, fileUrl, "Here's your landing page — thanks for your purchase!");
+          logger.info("Delivered landing page via Telegram", { chatId, generationId });
+        } catch (err) {
+          logger.error("Failed to deliver landing page via Telegram", { chatId, generationId, error: err.message });
+        }
+      } else {
+        logger.warn("checkout.session.completed for unknown/expired landing page generation", { chatId, generationId });
+      }
+    } else if (slug === "buildunlock" && chatId) {
       // Not a file purchase — this unlocks unlimited /build generations for
       // this chatId going forward. See handlers/build.js.
       await buildHandler.markBuildUnlocked(chatId);
@@ -88,11 +105,11 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
       }
     } else {
       const offer = slug ? getOffer(slug) : null;
-
+ 
       if (offer) {
         paidSessions.set(session.id, { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` });
       }
-
+ 
       if (chatId && offer) {
         const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
         const fileUrl = `${publicUrl}/products/${offer.fileName}`;
@@ -110,14 +127,14 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
       }
     }
   }
-
+ 
   res.json({ received: true });
 });
-
+ 
 app.use(express.json());
 app.use("/products", express.static(path.join(__dirname, "products")));
 app.use(express.static(path.join(__dirname, "public")));
-
+ 
 const COMMANDS = {
   "/start": (chatId) => handleStart(chatId),
   "/build": (chatId) => buildHandler.handleBuild(chatId),
@@ -132,42 +149,48 @@ const COMMANDS = {
   "/automationpack": (chatId) => handleAutomationPack(chatId),
   "/websitepack": (chatId) => handleWebsitePack(chatId),
   "/brandingpack": (chatId) => handleBrandingPack(chatId),
+  "/landingpage": (chatId) => landingPageHandler.handleLandingPage(chatId),
 };
-
+ 
 function parseCommand(text) {
   const match = text.match(/^(\/[a-zA-Z_]+)(@\S+)?/);
   return match ? match[1].toLowerCase() : null;
 }
-
+ 
 async function routeTextMessage(chatId, text) {
   if (buildHandler.isAwaitingNiche(chatId)) {
     await buildHandler.handleNicheInput(chatId, text);
     return;
   }
-
+ 
+  if (landingPageHandler.isAwaitingDescription(chatId)) {
+    await landingPageHandler.handleDescriptionInput(chatId, text);
+    return;
+  }
+ 
   await telegram.sendMessage(
     chatId,
     "Not sure what you mean\\. Try /build to generate a business kit, or /help to see all commands\\."
   );
 }
-
+ 
 async function routeMessage(message) {
   const chatId = message.chat?.id;
   const text = message.text;
-
+ 
   if (!chatId || typeof text !== "string") {
     logger.warn("Received message with no chat id or text, skipping", { message });
     return;
   }
-
+ 
   const command = text.startsWith("/") ? parseCommand(text) : null;
-
+ 
   if (command && COMMANDS[command]) {
     logger.info("Routing command", { chatId, command });
     await COMMANDS[command](chatId, text);
     return;
   }
-
+ 
   if (command && !COMMANDS[command]) {
     await telegram.sendMessage(
       chatId,
@@ -175,48 +198,48 @@ async function routeMessage(message) {
     );
     return;
   }
-
+ 
   await routeTextMessage(chatId, text);
 }
-
+ 
 async function routeCallbackQuery(callbackQuery) {
   const chatId = callbackQuery.message?.chat?.id;
   const data = callbackQuery.data || "";
-
+ 
   if (!chatId) {
     logger.warn("Received callback_query with no chat id, skipping", { callbackQuery });
     return;
   }
-
+ 
   logger.info("Routing callback_query", { chatId, data });
-
+ 
   if (data.startsWith("settings:")) {
     await settingsHandler.handleSettingsCallback(chatId, data);
     return;
   }
-
+ 
   if (data.startsWith("upgrade:")) {
     await sendOfferDetail(chatId, data.split(":")[1]);
     return;
   }
-
+ 
   if (data.startsWith("buy:")) {
     const slug = data.split(":")[1];
     const offer = getOffer(slug);
-
+ 
     if (!offer) {
       await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
       return;
     }
-
+ 
     if (!offer.paymentLink) {
       logger.error("No payment link configured for offer", { slug });
       await telegram.sendMessage(chatId, "This add\\-on isn't available for purchase right now\\. Please contact /support\\.");
       return;
     }
-
+ 
     const checkoutUrl = `${offer.paymentLink}?client_reference_id=${chatId}_${slug}`;
-
+ 
     await telegram.sendMessageWithButtons(
       chatId,
       `Tap below to pay securely via Stripe\\. Your file arrives right here as soon as payment is confirmed\\.`,
@@ -224,10 +247,10 @@ async function routeCallbackQuery(callbackQuery) {
     );
     return;
   }
-
+ 
   if (data.startsWith("buystars:")) {
     const slug = data.split(":")[1];
-
+ 
     if (slug === "buildunlock") {
       await telegram.sendInvoice(
         chatId,
@@ -238,20 +261,37 @@ async function routeCallbackQuery(callbackQuery) {
       );
       return;
     }
-
+ 
+    if (slug.startsWith(landingPageHandler.LANDING_PAGE_SLUG_PREFIX)) {
+      const generationId = slug.slice(landingPageHandler.LANDING_PAGE_SLUG_PREFIX.length);
+      const gen = landingPageHandler.getGeneration(generationId);
+      if (!gen) {
+        await telegram.sendMessage(chatId, "Sorry, that preview has expired\\. Run /landingpage to generate a new one\\.");
+        return;
+      }
+      await telegram.sendInvoice(
+        chatId,
+        "Landing Page",
+        "Your complete, ready-to-publish landing page.",
+        slug,
+        850
+      );
+      return;
+    }
+ 
     const offer = getOffer(slug);
     if (!offer) {
       await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
       return;
     }
-
+ 
     await telegram.sendInvoice(chatId, offer.name, offer.tagline, offer.slug, offer.starsPrice);
     return;
   }
-
+ 
   logger.warn("Unhandled callback_query data", { data });
 }
-
+ 
 // Handles a pre_checkout_query — Telegram's way of asking "is this order
 // still valid?" right before the user is charged in Stars. Must respond
 // within 10 seconds. We approve anything matching a known offer or the
@@ -259,8 +299,11 @@ async function routeCallbackQuery(callbackQuery) {
 // happen, since payload only ever comes from our own sendInvoice calls).
 async function routePreCheckoutQuery(query) {
   const slug = query.invoice_payload;
-  const isValid = slug === "buildunlock" || Boolean(getOffer(slug));
-
+  const isLandingPage =
+    slug && slug.startsWith(landingPageHandler.LANDING_PAGE_SLUG_PREFIX) &&
+    Boolean(landingPageHandler.getGeneration(slug.slice(landingPageHandler.LANDING_PAGE_SLUG_PREFIX.length)));
+  const isValid = slug === "buildunlock" || isLandingPage || Boolean(getOffer(slug));
+ 
   try {
     await telegram.answerPreCheckoutQuery(
       query.id,
@@ -271,7 +314,7 @@ async function routePreCheckoutQuery(query) {
     logger.error("Failed to answer pre_checkout_query", { queryId: query.id, error: err.message });
   }
 }
-
+ 
 // Handles a completed Telegram Stars payment (arrives as a normal message
 // with a successful_payment field). This is the Stars equivalent of the
 // Stripe webhook's checkout.session.completed handling — same delivery
@@ -279,14 +322,32 @@ async function routePreCheckoutQuery(query) {
 async function routeSuccessfulPayment(message) {
   const chatId = message.chat?.id;
   const payload = message.successful_payment?.invoice_payload;
-
+ 
   if (!chatId || !payload) {
     logger.warn("successful_payment missing chatId or invoice_payload", { message });
     return;
   }
-
+ 
   logger.info("Received successful Telegram Stars payment", { chatId, payload });
-
+ 
+  if (payload.startsWith(landingPageHandler.LANDING_PAGE_SLUG_PREFIX)) {
+    const generationId = payload.slice(landingPageHandler.LANDING_PAGE_SLUG_PREFIX.length);
+    const gen = landingPageHandler.markPaid(generationId);
+    if (!gen) {
+      logger.warn("successful_payment for unknown/expired landing page generation", { chatId, generationId });
+      return;
+    }
+    const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+    const fileUrl = `${publicUrl}/landingpage-download/${generationId}`;
+    try {
+      await telegram.sendDocument(chatId, fileUrl, "Here's your landing page — thanks for your purchase!");
+      logger.info("Delivered landing page via Telegram (Stars)", { chatId, generationId });
+    } catch (err) {
+      logger.error("Failed to deliver landing page via Telegram (Stars)", { chatId, generationId, error: err.message });
+    }
+    return;
+  }
+ 
   if (payload === "buildunlock") {
     await buildHandler.markBuildUnlocked(chatId);
     try {
@@ -299,13 +360,13 @@ async function routeSuccessfulPayment(message) {
     }
     return;
   }
-
+ 
   const offer = getOffer(payload);
   if (!offer) {
     logger.warn("successful_payment with unknown invoice_payload", { chatId, payload });
     return;
   }
-
+ 
   const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
   const fileUrl = `${publicUrl}/products/${offer.fileName}`;
   try {
@@ -315,7 +376,7 @@ async function routeSuccessfulPayment(message) {
     logger.error("Failed to deliver purchased file via Telegram (Stars)", { chatId, payload, error: err.message });
   }
 }
-
+ 
 // Respond to Telegram immediately, before any processing. Telegram expects a
 // fast acknowledgment on webhooks — if a slow handler (like business kit
 // generation, which can take a minute or more) blocks the response, Telegram
@@ -326,12 +387,12 @@ async function routeSuccessfulPayment(message) {
 // Acknowledging immediately and doing the real work afterward, detached from
 // the response, avoids this entirely.
 const processedTelegramUpdateIds = new Set();
-
+ 
 app.post("/webhook", (req, res) => {
   res.sendStatus(200);
-
+ 
   const update = req.body;
-
+ 
   // Guard against duplicate delivery of the same update (whether from a
   // Telegram-side retry or any other cause) racing against in-progress
   // session state for slow operations like business kit generation.
@@ -342,7 +403,7 @@ app.post("/webhook", (req, res) => {
     }
     processedTelegramUpdateIds.add(update.update_id);
   }
-
+ 
   (async () => {
     try {
       if (update.pre_checkout_query) {
@@ -358,10 +419,10 @@ app.post("/webhook", (req, res) => {
       }
     } catch (err) {
       logger.error("Unhandled error processing update", { error: err.message, stack: err.stack });
-
+ 
       const chatId =
         update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-
+ 
       if (chatId) {
         try {
           await telegram.sendMessage(
@@ -375,7 +436,7 @@ app.post("/webhook", (req, res) => {
     }
   })();
 });
-
+ 
 // GET /download-info — verifies a completed Checkout Session (from a
 // Payment Link's after-completion redirect) and returns the download URL
 // for the purchased file. This is a plain HTTP GET, not triggered from
@@ -384,11 +445,11 @@ app.post("/webhook", (req, res) => {
 // cold when the webhook fired.
 app.get("/download-info", async (req, res) => {
   const sessionId = req.query.session_id;
-
+ 
   if (!sessionId) {
     return res.status(400).json({ paid: false, error: "Missing session_id" });
   }
-
+ 
   // Check our own local cache first — populated directly by the webhook, no
   // outbound Stripe call needed. This is the fast, reliable path.
   const cached = paidSessions.get(sessionId);
@@ -398,7 +459,7 @@ app.get("/download-info", async (req, res) => {
     }
     return res.json({ paid: true, offerName: cached.offerName, downloadUrl: cached.downloadUrl });
   }
-
+ 
   // Fall back to a live lookup only if the webhook hasn't arrived yet (or at
   // all) for this session. This call has occasionally failed with a
   // connection error on this hosting setup — if it fails, we simply report
@@ -408,7 +469,7 @@ app.get("/download-info", async (req, res) => {
     const session = await stripeService.retrieveSession(sessionId);
     const ref = session.client_reference_id || "";
     const [chatId, slug] = ref.split("_");
-
+ 
     if (slug === "buildunlock") {
       if (session.payment_status === "paid" && chatId) {
         await buildHandler.markBuildUnlocked(chatId);
@@ -417,30 +478,55 @@ app.get("/download-info", async (req, res) => {
       }
       return res.json({ paid: false });
     }
-
+ 
     const offer = slug ? getOffer(slug) : null;
-
+ 
     if (session.payment_status === "paid" && offer) {
       const result = { offerName: offer.name, downloadUrl: `/products/${offer.fileName}` };
       paidSessions.set(sessionId, result);
       return res.json({ paid: true, ...result });
     }
-
+ 
     res.json({ paid: false });
   } catch (err) {
     logger.error("Live session verification failed, relying on webhook to populate cache", { error: err.message });
     res.json({ paid: false });
   }
 });
-
+ 
+// GET /landingpage-preview/:id — serves the free preview (hero + locked
+// placeholder) as a real, viewable HTML page. Anyone with the link can view
+// it (there's nothing sensitive in a preview), but it's a random 16-char
+// hex ID, not guessable.
+app.get("/landingpage-preview/:id", (req, res) => {
+  const gen = landingPageHandler.getGeneration(req.params.id);
+  if (!gen) {
+    return res.status(404).send("This preview link has expired or doesn't exist. Run /landingpage in the bot to generate a new one.");
+  }
+  res.set("Content-Type", "text/html");
+  res.send(gen.previewHtml);
+});
+ 
+// GET /landingpage-download/:id — serves the complete page, ONLY once paid.
+// This is what Telegram's sendDocument fetches from to deliver the file.
+app.get("/landingpage-download/:id", (req, res) => {
+  const gen = landingPageHandler.getGeneration(req.params.id);
+  if (!gen || !gen.paid) {
+    return res.status(403).send("This landing page hasn't been unlocked yet.");
+  }
+  res.set("Content-Type", "text/html");
+  res.set("Content-Disposition", 'attachment; filename="landing-page.html"');
+  res.send(gen.fullHtml);
+});
+ 
 // Simple health check for uptime monitoring / load balancer probes.
 app.get("/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
-
+ 
 app.listen(PORT, () => {
   logger.info(`Instant Business Builder backend listening on port ${PORT}`);
-
+ 
   if (process.env.PUBLIC_URL) {
     telegram
       .setWebhook(process.env.PUBLIC_URL)
@@ -449,11 +535,11 @@ app.listen(PORT, () => {
     logger.warn("PUBLIC_URL not set — webhook was not auto-registered. Set it manually via Telegram's setWebhook API.");
   }
 });
-
+ 
 process.on("unhandledRejection", (reason) => {
   logger.error("Unhandled promise rejection", { reason });
 });
-
+ 
 process.on("uncaughtException", (err) => {
   logger.error("Uncaught exception", { error: err.message, stack: err.stack });
 });
