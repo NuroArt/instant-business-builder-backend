@@ -225,7 +225,95 @@ async function routeCallbackQuery(callbackQuery) {
     return;
   }
 
+  if (data.startsWith("buystars:")) {
+    const slug = data.split(":")[1];
+
+    if (slug === "buildunlock") {
+      await telegram.sendInvoice(
+        chatId,
+        "Unlimited Build Unlock",
+        "Unlock unlimited business kit generations, forever.",
+        "buildunlock",
+        850
+      );
+      return;
+    }
+
+    const offer = getOffer(slug);
+    if (!offer) {
+      await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
+      return;
+    }
+
+    await telegram.sendInvoice(chatId, offer.name, offer.tagline, offer.slug, offer.starsPrice);
+    return;
+  }
+
   logger.warn("Unhandled callback_query data", { data });
+}
+
+// Handles a pre_checkout_query — Telegram's way of asking "is this order
+// still valid?" right before the user is charged in Stars. Must respond
+// within 10 seconds. We approve anything matching a known offer or the
+// build-unlock slug, and reject anything else (which shouldn't normally
+// happen, since payload only ever comes from our own sendInvoice calls).
+async function routePreCheckoutQuery(query) {
+  const slug = query.invoice_payload;
+  const isValid = slug === "buildunlock" || Boolean(getOffer(slug));
+
+  try {
+    await telegram.answerPreCheckoutQuery(
+      query.id,
+      isValid,
+      isValid ? undefined : "Sorry, this item is no longer available."
+    );
+  } catch (err) {
+    logger.error("Failed to answer pre_checkout_query", { queryId: query.id, error: err.message });
+  }
+}
+
+// Handles a completed Telegram Stars payment (arrives as a normal message
+// with a successful_payment field). This is the Stars equivalent of the
+// Stripe webhook's checkout.session.completed handling — same delivery
+// logic, different payment rail.
+async function routeSuccessfulPayment(message) {
+  const chatId = message.chat?.id;
+  const payload = message.successful_payment?.invoice_payload;
+
+  if (!chatId || !payload) {
+    logger.warn("successful_payment missing chatId or invoice_payload", { message });
+    return;
+  }
+
+  logger.info("Received successful Telegram Stars payment", { chatId, payload });
+
+  if (payload === "buildunlock") {
+    await buildHandler.markBuildUnlocked(chatId);
+    try {
+      await telegram.sendMessage(
+        chatId,
+        "🎉 Unlimited kit generations unlocked\\! Run /build anytime — no limits, ever\\."
+      );
+    } catch (err) {
+      logger.error("Failed to send build-unlock confirmation via Telegram (Stars)", { chatId, error: err.message });
+    }
+    return;
+  }
+
+  const offer = getOffer(payload);
+  if (!offer) {
+    logger.warn("successful_payment with unknown invoice_payload", { chatId, payload });
+    return;
+  }
+
+  const publicUrl = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+  const fileUrl = `${publicUrl}/products/${offer.fileName}`;
+  try {
+    await telegram.sendDocument(chatId, fileUrl, `Here's your ${offer.name} — thanks for your purchase!`);
+    logger.info("Delivered purchased file via Telegram (Stars)", { chatId, payload });
+  } catch (err) {
+    logger.error("Failed to deliver purchased file via Telegram (Stars)", { chatId, payload, error: err.message });
+  }
 }
 
 // Respond to Telegram immediately, before any processing. Telegram expects a
@@ -257,7 +345,11 @@ app.post("/webhook", (req, res) => {
 
   (async () => {
     try {
-      if (update.message) {
+      if (update.pre_checkout_query) {
+        await routePreCheckoutQuery(update.pre_checkout_query);
+      } else if (update.message?.successful_payment) {
+        await routeSuccessfulPayment(update.message);
+      } else if (update.message) {
         await routeMessage(update.message);
       } else if (update.callback_query) {
         await routeCallbackQuery(update.callback_query);
