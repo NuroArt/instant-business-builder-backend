@@ -16,8 +16,9 @@ async function handleStart(chatId) {
       `${esc("/settings")} — preferences\n` +
       `${esc("/support")} — get help\n` +
       `${esc("/restart")} — start over`,
-     `🌐 ${esc("For our full product lineup, visit:")} [www.nuroworks.com](https://www.nuroworks.com)`,
+     `🌐 ${esc("For our full product lineup, visit:")} [${esc("www.nuroworks.com")}](https://www.nuroworks.com)`,
   ].join("\n\n");
   await telegram.sendMessage(chatId, message);
 }
 module.exports = handleStart;
+ 
