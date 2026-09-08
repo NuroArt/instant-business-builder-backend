@@ -1,8 +1,6 @@
 // handlers/help.js
-
 const telegram = require("../telegram");
 const { formatSimpleMessage, esc, header } = require("../utils/formatOutput");
-
 async function handleHelp(chatId) {
   const message = [
     header("How It Works"),
@@ -10,13 +8,12 @@ async function handleHelp(chatId) {
     formatSimpleMessage("Other Commands", [
       "/examples — see a sample kit",
       "/niches — niche ideas if you're not sure where to start",
+      "/salespack — generate a custom offer breakdown, sales page, and launch emails ($19)",
       "/settings — preferences",
       "/support — get help from a human",
       "/restart — clear your session and start over",
     ]),
   ].join("\n\n");
-
   await telegram.sendMessage(chatId, message);
 }
-
 module.exports = handleHelp;
