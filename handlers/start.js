@@ -1,8 +1,6 @@
 // handlers/start.js
-
 const telegram = require("../telegram");
 const { header, esc } = require("../utils/formatOutput");
-
 async function handleStart(chatId) {
   const message = [
     header("Instant Business Builder"),
@@ -19,9 +17,7 @@ async function handleStart(chatId) {
       `${esc("/support")} — get help\n` +
       `${esc("/restart")} — start over`,
      `🌐 ${esc("For our full product lineup, visit:")} [www.nuroworks.com](https://www.nuroworks.com)`,
-    `✨ ${esc("Also try Instant Landing Page — generate a full website in minutes:")} [Try it here](https://l-page-gen.onrender.com)`,
   ].join("\n\n");
   await telegram.sendMessage(chatId, message);
 }
-
 module.exports = handleStart;
