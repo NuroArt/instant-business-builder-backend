@@ -20,29 +20,29 @@
 // landing pages — if this service restarts between generating a preview
 // and completing payment, that generation is lost and the person needs to
 // run /salespack again, which is fast and free to redo.
-
+ 
 const crypto = require("crypto");
 const telegram = require("../telegram");
 const claude = require("../claude");
 const logger = require("../utils/logger");
 const { header, esc, formatSalesOfferPack, formatSalesPackPreview } = require("../utils/formatOutput");
-
+ 
 const sessionState = new Map(); // chatId -> "awaiting_description" | "generating"
 const generations = new Map(); // generationId -> { chatId, pack, paid }
-
+ 
 const SALES_PACK_SLUG_PREFIX = "salespack-";
 const SALES_PACK_PRICE = "$19";
 const SALES_PACK_STARS = 850;
 const SALES_PACK_LINK = process.env.STRIPE_LINK_SALESPACK;
-
+ 
 function isAwaitingDescription(chatId) {
   return sessionState.get(chatId) === "awaiting_description";
 }
-
+ 
 function clearSession(chatId) {
   sessionState.delete(chatId);
 }
-
+ 
 async function handleSalesPack(chatId) {
   sessionState.set(chatId, "awaiting_description");
   const message = [
@@ -56,10 +56,10 @@ async function handleSalesPack(chatId) {
   ].join("\n\n");
   await telegram.sendMessage(chatId, message);
 }
-
+ 
 async function handleDescriptionInput(chatId, description) {
   const trimmed = (description || "").trim();
-
+ 
   if (trimmed.length < 5) {
     await telegram.sendMessage(
       chatId,
@@ -67,22 +67,22 @@ async function handleDescriptionInput(chatId, description) {
     );
     return;
   }
-
+ 
   sessionState.set(chatId, "generating");
   await telegram.sendMessage(
     chatId,
     `${header("Generating Your Sales & Offer Pack")}\n\n${esc("This usually takes about a minute...")}`
   );
   await telegram.sendTyping(chatId);
-
+ 
   try {
     const pack = await claude.generateSalesOfferPack(trimmed);
-
+ 
     const generationId = crypto.randomBytes(8).toString("hex");
     generations.set(generationId, { chatId, pack, paid: false });
-
+ 
     const slug = `${SALES_PACK_SLUG_PREFIX}${generationId}`;
-
+ 
     const buttons = [];
     if (SALES_PACK_LINK) {
       const checkoutUrl = `${SALES_PACK_LINK}?client_reference_id=${chatId}_${slug}`;
@@ -91,7 +91,7 @@ async function handleDescriptionInput(chatId, description) {
       logger.warn("STRIPE_LINK_SALESPACK is not set — only the Stars option will be offered", { chatId });
     }
     buttons.push([{ text: `⭐ Pay with ${SALES_PACK_STARS} Stars`, callback_data: `buystars:${slug}` }]);
-
+ 
     const previewMessage = formatSalesPackPreview(pack);
     await telegram.sendMessageWithButtons(chatId, previewMessage, buttons);
     sessionState.delete(chatId);
@@ -105,11 +105,11 @@ async function handleDescriptionInput(chatId, description) {
     await telegram.sendMessage(chatId, esc(userMessage));
   }
 }
-
+ 
 function getGeneration(generationId) {
   return generations.get(generationId) || null;
 }
-
+ 
 /**
  * Called by index.js once a Sales & Offer Pack purchase (Stripe or Stars)
  * completes. Marks the generation paid AND delivers the full content
@@ -119,9 +119,9 @@ function getGeneration(generationId) {
 async function markPaidAndDeliver(generationId) {
   const gen = generations.get(generationId);
   if (!gen) return null;
-
+ 
   gen.paid = true;
-
+ 
   try {
     const messages = formatSalesOfferPack(gen.pack);
     for (const msg of messages) {
@@ -136,10 +136,10 @@ async function markPaidAndDeliver(generationId) {
       error: err.message,
     });
   }
-
+ 
   return gen;
 }
-
+ 
 module.exports = {
   handleSalesPack,
   handleDescriptionInput,
