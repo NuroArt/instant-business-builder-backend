@@ -38,6 +38,7 @@ const handleWebsitePack = require("./handlers/websitepack");
 const handleBrandingPack = require("./handlers/brandingpack");
 const { sendOfferDetail } = require("./handlers/offerDetail");
 const landingPageHandler = require("./handlers/landingpage");
+const salesPackHandler = require("./handlers/salespack");
  
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -88,6 +89,18 @@ app.post("/webhook/stripe", express.raw({ type: "application/json" }), async (re
         }
       } else {
         logger.warn("checkout.session.completed for unknown/expired landing page generation", { chatId, generationId });
+      }
+    } else if (slug && slug.startsWith(salesPackHandler.SALES_PACK_SLUG_PREFIX) && chatId) {
+      // Sales & Offer Pack delivers via direct Telegram messages, not a
+      // file — markPaidAndDeliver() sends everything itself and returns the
+      // generation record so we can log/cache the result here.
+      const generationId = slug.slice(salesPackHandler.SALES_PACK_SLUG_PREFIX.length);
+      const gen = await salesPackHandler.markPaidAndDeliver(generationId);
+      if (gen) {
+        paidSessions.set(session.id, { isSalesPack: true, generationId });
+        logger.info("Delivered Sales & Offer Pack via Telegram", { chatId, generationId });
+      } else {
+        logger.warn("checkout.session.completed for unknown/expired sales pack generation", { chatId, generationId });
       }
     } else if (slug === "buildunlock" && chatId) {
       // Not a file purchase — this unlocks unlimited /build generations for
@@ -150,6 +163,7 @@ const COMMANDS = {
   "/websitepack": (chatId) => handleWebsitePack(chatId),
   "/brandingpack": (chatId) => handleBrandingPack(chatId),
   "/landingpage": (chatId) => landingPageHandler.handleLandingPage(chatId),
+  "/salespack": (chatId) => salesPackHandler.handleSalesPack(chatId),
 };
  
 function parseCommand(text) {
@@ -165,6 +179,11 @@ async function routeTextMessage(chatId, text) {
  
   if (landingPageHandler.isAwaitingDescription(chatId)) {
     await landingPageHandler.handleDescriptionInput(chatId, text);
+    return;
+  }
+ 
+  if (salesPackHandler.isAwaitingDescription(chatId)) {
+    await salesPackHandler.handleDescriptionInput(chatId, text);
     return;
   }
  
@@ -279,6 +298,23 @@ async function routeCallbackQuery(callbackQuery) {
       return;
     }
  
+    if (slug.startsWith(salesPackHandler.SALES_PACK_SLUG_PREFIX)) {
+      const generationId = slug.slice(salesPackHandler.SALES_PACK_SLUG_PREFIX.length);
+      const gen = salesPackHandler.getGeneration(generationId);
+      if (!gen) {
+        await telegram.sendMessage(chatId, "Sorry, that preview has expired\\. Run /salespack to generate a new one\\.");
+        return;
+      }
+      await telegram.sendInvoice(
+        chatId,
+        "Sales & Offer Pack",
+        "Your complete offer breakdown, sales page copy, and launch email sequence.",
+        slug,
+        850
+      );
+      return;
+    }
+ 
     const offer = getOffer(slug);
     if (!offer) {
       await telegram.sendMessage(chatId, "Sorry, I couldn't find that add\\-on\\. Run /upgrade to see what's available\\.");
@@ -302,7 +338,10 @@ async function routePreCheckoutQuery(query) {
   const isLandingPage =
     slug && slug.startsWith(landingPageHandler.LANDING_PAGE_SLUG_PREFIX) &&
     Boolean(landingPageHandler.getGeneration(slug.slice(landingPageHandler.LANDING_PAGE_SLUG_PREFIX.length)));
-  const isValid = slug === "buildunlock" || isLandingPage || Boolean(getOffer(slug));
+  const isSalesPack =
+    slug && slug.startsWith(salesPackHandler.SALES_PACK_SLUG_PREFIX) &&
+    Boolean(salesPackHandler.getGeneration(slug.slice(salesPackHandler.SALES_PACK_SLUG_PREFIX.length)));
+  const isValid = slug === "buildunlock" || isLandingPage || isSalesPack || Boolean(getOffer(slug));
  
   try {
     await telegram.answerPreCheckoutQuery(
@@ -344,6 +383,20 @@ async function routeSuccessfulPayment(message) {
       logger.info("Delivered landing page via Telegram (Stars)", { chatId, generationId });
     } catch (err) {
       logger.error("Failed to deliver landing page via Telegram (Stars)", { chatId, generationId, error: err.message });
+    }
+    return;
+  }
+ 
+  if (payload.startsWith(salesPackHandler.SALES_PACK_SLUG_PREFIX)) {
+    // markPaidAndDeliver() sends the Telegram messages itself (there's no
+    // file to fetch/serve for this product), so nothing further to do here
+    // beyond logging the outcome.
+    const generationId = payload.slice(salesPackHandler.SALES_PACK_SLUG_PREFIX.length);
+    const gen = await salesPackHandler.markPaidAndDeliver(generationId);
+    if (!gen) {
+      logger.warn("successful_payment for unknown/expired sales pack generation", { chatId, generationId });
+    } else {
+      logger.info("Delivered Sales & Offer Pack via Telegram (Stars)", { chatId, generationId });
     }
     return;
   }
