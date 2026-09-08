@@ -1,18 +1,18 @@
 // claude.js
 // Wrapper around Anthropic's Messages API for generating business kit content.
-
+ 
 const axios = require("axios");
 const logger = require("./utils/logger");
-
+ 
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5";
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-
+ 
 if (!CLAUDE_API_KEY) {
   logger.warn("CLAUDE_API_KEY is not set — Claude calls will fail until it is configured.");
 }
-
+ 
 const client = axios.create({
   baseURL: CLAUDE_API_URL,
   timeout: 240000, // generation can take a while for a full business kit
@@ -22,7 +22,7 @@ const client = axios.create({
     "content-type": "application/json",
   },
 });
-
+ 
 /**
  * Low-level call to the Messages API. Retries once on transient (5xx/timeout) failures.
  * @param {string} systemPrompt
@@ -37,7 +37,7 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   };
-
+ 
   const attempt = async () => {
     const res = await client.post("", payload);
     const textBlocks = (res.data.content || [])
@@ -45,13 +45,13 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
       .map((block) => block.text);
     return textBlocks.join("\n").trim();
   };
-
+ 
   try {
     return await attempt();
   } catch (err) {
     const status = err.response?.status;
     const isRetryable = !status || status >= 500 || err.code === "ECONNABORTED";
-
+ 
     if (isRetryable) {
       logger.warn("Claude API call failed, retrying once", {
         status,
@@ -66,7 +66,7 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
         throw retryErr;
       }
     }
-
+ 
     logger.error("Claude API call failed (non-retryable)", {
       status,
       error: err.response?.data || err.message,
@@ -74,7 +74,7 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
     throw err;
   }
 }
-
+ 
 // ---------------------------------------------------------------------------
 // The full kit is split into THREE parallel Claude calls, not two. An
 // earlier version used two calls (foundation+products+websiteCopy, and
@@ -88,17 +88,17 @@ async function callClaude(systemPrompt, userPrompt, opts = {}) {
 // can't balloon again. Do not recombine these calls — that's the bug this
 // fixes.
 // ---------------------------------------------------------------------------
-
+ 
 const PART1_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
 NuroWorks product. Given a single niche or business idea, you produce PART ONE of a complete business
 starter kit: foundation, products, and website copy.
-
+ 
 Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
 Every line must be usable as-is by a real founder.
-
+ 
 You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
 outside the JSON):
-
+ 
 {
   "foundation": {
     "businessNames": ["string", ...5-7 items],
@@ -126,21 +126,21 @@ outside the JSON):
     "brandVoiceGuide": "string"
   }
 }
-
+ 
 Keep each string field concise but complete — a few sentences or a short list rendered as plain text
 with line breaks, not nested markdown. Arrays should contain short, punchy, ready-to-use lines.
 Do not include any text outside the single JSON object. Stay within a 3500-token output budget.`;
-
+ 
 const PART2_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
 NuroWorks product. Given a single niche or business idea, you produce PART TWO of a complete business
 starter kit: the marketing module only.
-
+ 
 Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
 Every line must be usable as-is by a real founder.
-
+ 
 You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
 outside the JSON):
-
+ 
 {
   "marketing": {
     "contentCalendar30Day": ["string", ...EXACTLY 30 items, one per day],
@@ -152,26 +152,26 @@ outside the JSON):
     "leadMagnetConcept": "string"
   }
 }
-
+ 
 CRITICAL LENGTH LIMIT: each entry in contentCalendar30Day MUST be a single short line of 8-15 words —
 a content idea or hook only (e.g. "Before/after transformation reel of a stained carpet"), NOT a full
 caption, script, or multi-sentence description. This field alone will overflow the response if entries
 run long, so brevity here is mandatory, not optional.
-
+ 
 Keep all other string fields concise but complete — a few sentences or a short list rendered as plain
 text with line breaks, not nested markdown. Do not include any text outside the single JSON object.
 Stay within a 4500-token output budget.`;
-
+ 
 const PART3_SYSTEM_PROMPT = `You are the generation engine for "Instant Business Builder," a premium
 NuroWorks product. Given a single niche or business idea, you produce PART THREE of a complete business
 starter kit: automation and monetization.
-
+ 
 Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
 Every line must be usable as-is by a real founder.
-
+ 
 You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
 outside the JSON):
-
+ 
 {
   "automation": {
     "clientOnboarding": "string",
@@ -188,11 +188,57 @@ outside the JSON):
     "growthRoadmap": "string"
   }
 }
-
+ 
 Keep each string field concise but complete — a few sentences rendered as plain text with line breaks,
 not nested markdown. Do not include any text outside the single JSON object. Stay within a 3000-token
 output budget.`;
-
+ 
+// ---------------------------------------------------------------------------
+// Sales & Offer Pack — a single-call generator (not split into parts, since
+// its combined output is smaller than any one part of the business kit).
+// Used by handlers/salespack.js, which follows the same on-demand,
+// per-request generation pattern as handlers/landingpage.js rather than the
+// four static premium packs.
+// ---------------------------------------------------------------------------
+ 
+const SALES_PACK_SYSTEM_PROMPT = `You are the generation engine for the "Sales & Offer Pack," a premium
+add-on for NuroWorks' "Instant Business Builder." Given a description of someone's business or offer,
+you produce a complete sales and conversion package: offer breakdown, sales page copy, a launch email
+sequence, and upsell/downsell logic.
+ 
+Voice: clean, professional, confident, direct. No fluff, no filler, no generic corporate language.
+Every line must be usable as-is by a real founder.
+ 
+You MUST return output as valid JSON with exactly this shape (no markdown fences, no commentary
+outside the JSON):
+ 
+{
+  "offerBreakdown": {
+    "coreOffer": "string",
+    "tiers": [{ "name": "string", "price": "string", "includes": ["string", ...] }, ...2 items],
+    "bonuses": ["string", ...2-3 items],
+    "guarantee": "string",
+    "priceJustification": "string"
+  },
+  "salesPageStructure": {
+    "headline": "string",
+    "subheadline": "string",
+    "problemAgitation": ["string", ...3 items],
+    "solutionIntro": "string",
+    "whatsIncluded": ["string", ...],
+    "faq": [{ "question": "string", "answer": "string" }, ...4-5 items],
+    "finalCTA": "string"
+  },
+  "emailSequence": [
+    { "subject": "string", "purpose": "string", "keyMessage": "string", "cta": "string" }, ...EXACTLY 5 items
+  ],
+  "upsellDownsell": { "upsell": "string", "downsell": "string" }
+}
+ 
+Keep each string field concise but complete — a few sentences rendered as plain text, not nested
+markdown. Do not include any text outside the single JSON object. Stay within a 4000-token output
+budget.`;
+ 
 function parseJsonResponse(raw, label) {
   try {
     return JSON.parse(raw);
@@ -210,7 +256,7 @@ function parseJsonResponse(raw, label) {
     }
   }
 }
-
+ 
 /**
  * Generates a full business kit for a given niche, via three parallel Claude
  * calls (see comment above), merged into a single object.
@@ -219,21 +265,34 @@ function parseJsonResponse(raw, label) {
  */
 async function generateBusinessKit(niche) {
   const userPrompt = `Niche / business idea: "${niche}"\n\nGenerate this part of the business kit as specified.`;
-
+ 
   const [part1Raw, part2Raw, part3Raw] = await Promise.all([
     callClaude(PART1_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
     callClaude(PART2_SYSTEM_PROMPT, userPrompt, { maxTokens: 4500 }),
     callClaude(PART3_SYSTEM_PROMPT, userPrompt, { maxTokens: 3500 }),
   ]);
-
+ 
   const part1 = parseJsonResponse(part1Raw, "part1");
   const part2 = parseJsonResponse(part2Raw, "part2");
   const part3 = parseJsonResponse(part3Raw, "part3");
-
+ 
   return { ...part1, ...part2, ...part3 };
 }
-
+ 
+/**
+ * Generates a Sales & Offer Pack for a given business/offer description, via
+ * a single Claude call.
+ * @param {string} businessDescription - raw user input describing the offer
+ * @returns {Promise<object>} parsed sales pack object
+ */
+async function generateSalesOfferPack(businessDescription) {
+  const userPrompt = `Business/offer description: "${businessDescription}"\n\nGenerate the Sales & Offer Pack as specified.`;
+  const raw = await callClaude(SALES_PACK_SYSTEM_PROMPT, userPrompt, { maxTokens: 4000 });
+  return parseJsonResponse(raw, "salesOfferPack");
+}
+ 
 module.exports = {
   callClaude,
   generateBusinessKit,
+  generateSalesOfferPack,
 };
